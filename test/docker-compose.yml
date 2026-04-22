@@ -1,0 +1,30 @@
+services:
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: mailing-rabbitmq-test
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: mailing
+      RABBITMQ_DEFAULT_PASS: mailing
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - mailing-net
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  rabbitmq-data:
+
+networks:
+  mailing-net:
+    name: mailing-net

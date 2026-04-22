@@ -1,0 +1,5 @@
+.env
+rabbitmq-data/
+.venv/
+__pycache__/
+*.pyc

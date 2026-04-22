@@ -1,0 +1,16 @@
+services:
+
+  mailing_service:
+    build:
+      context: .
+      dockerfile: mailing_service/Dockerfile
+    container_name: mailing_service
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - mailing-net
+
+networks:
+  mailing-net:
+    name: mailing-net
+    external: true
