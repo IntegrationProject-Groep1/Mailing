@@ -1,10 +1,3 @@
-"""Mailing service consumer.
-
-Consumes alert XML messages from RabbitMQ and dispatches them to the
-appropriate handler. The only flow currently wired up is the monitoring
-alert flow (queue ``monitoring.alerts``).
-"""
-
 import logging
 import os
 import signal
@@ -14,10 +7,17 @@ import time
 import pika
 from lxml import etree
 
-import handlers
+import envelope
+from consumers import send_mailing as send_mailing_consumer
+from consumers import system_alert as system_alert_consumer
+from publishers import system_error
 from sendgrid_client import SendGridError
 
 ALERT_QUEUE = "monitoring.alerts"
+CRM_SEND_MAILING_QUEUE = "crm.to.mailing"
+FACTURATIE_SEND_MAILING_QUEUE = "facturatie.to.mailing"
+MAILING_ERROR_QUEUE = system_error.ERROR_QUEUE   # "mailing.errors"
+
 CONNECT_RETRIES = 10
 CONNECT_DELAY_SECONDS = 2
 NACK_BACKOFF_SECONDS = 2
@@ -63,33 +63,52 @@ def connect() -> pika.BlockingConnection:
     raise RuntimeError("Could not connect to RabbitMQ after all retries")
 
 
-def load_schema() -> etree.XMLSchema:
-    path = os.getenv("ALERT_XSD_PATH", "/app/alert.xsd")
-    log.info("Loading alert XSD from %s", path)
+def _load_schema(name: str) -> etree.XMLSchema:
+    schemas_dir = os.getenv("SCHEMAS_DIR", "/app/schemas")
+    path = f"{schemas_dir}/{name}.xsd"
+    log.info("Loading XSD: %s", path)
     return etree.XMLSchema(etree.parse(path))
 
 
-def _build_callback(schema: etree.XMLSchema):
+def _build_callback(schema: etree.XMLSchema, handler, *, pass_channel: bool):
+    """Build a per-queue callback that validates + dispatches.
+
+    ``handler`` takes either ``(env)`` (system_alert flow) or
+    ``(env, channel)`` (send_mailing flow) — controlled by ``pass_channel``.
+    On envelope-format failures we publish a ``system_error`` and ack;
+    on transient SendGrid failures we nack-requeue; on permanent failures
+    we ack (the handler already published the appropriate response).
+    """
     def on_message(ch, method, _properties, body):
         delivery_tag = method.delivery_tag
         try:
-            doc = etree.fromstring(body)
-        except etree.XMLSyntaxError as exc:
-            log.warning("Malformed XML, discarding: %s", exc)
+            env = envelope.parse_and_validate(body, schema)
+        except envelope.MalformedXMLError as exc:
+            log.warning("Malformed XML on %s, flagging: %s", method.routing_key, exc)
+            system_error.publish(
+                ch,
+                error_code=system_error.INVALID_XML_FORMAT,
+                error_description=f"malformed XML on {method.routing_key}: {exc}",
+                related_message_id=None,
+            )
             ch.basic_ack(delivery_tag)
             return
-
-        if not schema.validate(doc):
-            log.warning("XSD validation failed, discarding: %s", schema.error_log)
+        except envelope.SchemaValidationError as exc:
+            log.warning("XSD validation failed on %s, flagging: %s", method.routing_key, exc)
+            system_error.publish(
+                ch,
+                error_code=system_error.INVALID_XML_FORMAT,
+                error_description=f"schema validation failed on {method.routing_key}: {exc}",
+                related_message_id=None,
+            )
             ch.basic_ack(delivery_tag)
             return
-
-        system = doc.findtext("system")
-        status = doc.findtext("status")
-        timestamp = doc.findtext("timestamp")
 
         try:
-            handlers.handle_alert(system, status, timestamp)
+            if pass_channel:
+                handler(env, ch)
+            else:
+                handler(env)
             ch.basic_ack(delivery_tag)
         except SendGridError as exc:
             log.error("Transient send failure, requeueing: %s", exc)
@@ -122,20 +141,56 @@ def _install_signal_handlers(connection: pika.BlockingConnection, channel) -> No
 
 
 def run() -> None:
-    schema = load_schema()
+    # Load all per-flow schemas once at startup. The mailing_status and
+    # system_error publishers lazy-load their own outbound schemas.
+    system_alert_schema = _load_schema("system_alert")
+    send_mailing_schema = _load_schema("send_mailing")
+
     while True:
         connection = connect()
         try:
             channel = connection.channel()
+            # Publisher confirms: required so a failed mailing_status publish
+            # raises and the original send_mailing gets nack-requeued.
+            channel.confirm_delivery()
+
+            # Queues we consume from.
             channel.queue_declare(queue=ALERT_QUEUE, durable=True)
+            channel.queue_declare(queue=CRM_SEND_MAILING_QUEUE, durable=True)
+            channel.queue_declare(queue=FACTURATIE_SEND_MAILING_QUEUE, durable=True)
+            # Queue we own and publish to (errors). crm.incoming is owned
+            # by CRM and intentionally NOT declared here.
+            channel.queue_declare(queue=MAILING_ERROR_QUEUE, durable=True)
+
             channel.basic_qos(prefetch_count=1)
+
             channel.basic_consume(
                 queue=ALERT_QUEUE,
-                on_message_callback=_build_callback(schema),
+                on_message_callback=_build_callback(
+                    system_alert_schema, system_alert_consumer.handle, pass_channel=False,
+                ),
                 auto_ack=False,
             )
+            channel.basic_consume(
+                queue=CRM_SEND_MAILING_QUEUE,
+                on_message_callback=_build_callback(
+                    send_mailing_schema, send_mailing_consumer.handle, pass_channel=True,
+                ),
+                auto_ack=False,
+            )
+            channel.basic_consume(
+                queue=FACTURATIE_SEND_MAILING_QUEUE,
+                on_message_callback=_build_callback(
+                    send_mailing_schema, send_mailing_consumer.handle, pass_channel=True,
+                ),
+                auto_ack=False,
+            )
+
             _install_signal_handlers(connection, channel)
-            log.info("Consuming queue %s", ALERT_QUEUE)
+            log.info(
+                "Consuming queues: %s, %s, %s",
+                ALERT_QUEUE, CRM_SEND_MAILING_QUEUE, FACTURATIE_SEND_MAILING_QUEUE,
+            )
             channel.start_consuming()
             log.info("Consumer stopped cleanly, exiting")
             return

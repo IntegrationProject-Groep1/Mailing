@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<message>
+  <header>
+    <message_id>{{MESSAGE_ID}}</message_id>
+    <timestamp>{{TIMESTAMP}}</timestamp>
+    <source>facturatie</source>
+    <type>send_mailing</type>
+    <version>2.0</version>
+    <correlation_id>{{CORRELATION_ID}}</correlation_id>
+  </header>
+  <body>
+    <campaign_id>sg-invoice-00142</campaign_id>
+    <subject>Uw factuur is beschikbaar</subject>
+    <template_id>tmpl-invoice-ready</template_id>
+    <mail_type>invoice_ready</mail_type>
+    <recipients>
+      <recipient>
+        <email>jan.peeters@example.test</email>
+        <user_id>e8b27c1d-4f2a-4b3e-9c5f-123456789abc</user_id>
+        <contact>
+          <first_name>Jan</first_name>
+          <last_name>Peeters</last_name>
+        </contact>
+      </recipient>
+    </recipients>
+    <template_data>{"invoice_id":"foss-inv-00142","amount":"31.50","currency":"eur","due_date":"2026-06-15"}</template_data>
+  </body>
+</message>

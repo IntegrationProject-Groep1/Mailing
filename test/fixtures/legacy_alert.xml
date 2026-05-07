@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The OLD flat v1.0 alert format. Sending this to monitoring.alerts after
+  the v2.0 cutover MUST produce a system_error on mailing.errors and zero
+  emails. Used to verify the strict-mode behaviour from the plan.
+-->
+<alert>
+  <system>facturatie</system>
+  <status>down</status>
+  <timestamp>{{TIMESTAMP}}</timestamp>
+</alert>

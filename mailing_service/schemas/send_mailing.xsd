@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Contract sections 12.1 and 13.1: CRM/Facturatie → Mailing send_mailing.
+  Same body shape from both sources; the source enum below permits either.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <xs:complexType name="ContactType">
+    <xs:sequence>
+      <xs:element name="first_name" type="xs:string"/>
+      <xs:element name="last_name"  type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="RecipientType">
+    <xs:sequence>
+      <xs:element name="email"   type="xs:string"/>
+      <xs:element name="user_id" type="xs:string"/>
+      <xs:element name="contact" type="ContactType"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AttachmentType">
+    <xs:sequence>
+      <xs:element name="filename"     type="xs:string"/>
+      <xs:element name="content_type" type="xs:string"/>
+      <xs:element name="base64_data"  type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="message">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="header">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="message_id" type="xs:string"/>
+              <xs:element name="timestamp"  type="xs:dateTime"/>
+              <xs:element name="source">
+                <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="crm"/>
+                  <xs:enumeration value="facturatie"/>
+                </xs:restriction></xs:simpleType>
+              </xs:element>
+              <xs:element name="type">
+                <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="send_mailing"/>
+                </xs:restriction></xs:simpleType>
+              </xs:element>
+              <xs:element name="version">
+                <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="2.0"/>
+                </xs:restriction></xs:simpleType>
+              </xs:element>
+              <!-- correlation_id is mandatory for send_mailing per §12.1: it is
+                   echoed back in the mailing_status response so the sender can
+                   match the result to the original request. -->
+              <xs:element name="correlation_id" type="xs:string"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <xs:element name="body">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="campaign_id" type="xs:string"/>
+              <xs:element name="subject"     type="xs:string"/>
+              <xs:element name="template_id" type="xs:string"/>
+              <xs:element name="mail_type">
+                <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="registration_confirmation"/>
+                  <xs:enumeration value="payment_confirmation"/>
+                  <xs:enumeration value="invoice_ready"/>
+                  <xs:enumeration value="session_update"/>
+                  <xs:enumeration value="general_announcement"/>
+                </xs:restriction></xs:simpleType>
+              </xs:element>
+              <xs:element name="recipients">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="recipient" type="RecipientType" maxOccurs="unbounded"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+              <!-- template_data: JSON string fed to the SendGrid template's
+                   dynamic_template_data. Free-form by design; we parse JSON
+                   in the handler, not the XSD. -->
+              <xs:element name="template_data" type="xs:string"      minOccurs="0"/>
+              <xs:element name="body_html"     type="xs:string"      minOccurs="0"/>
+              <xs:element name="attachment"    type="AttachmentType" minOccurs="0"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

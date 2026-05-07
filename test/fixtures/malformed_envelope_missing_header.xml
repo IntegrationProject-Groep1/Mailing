@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Well-formed XML, but the envelope has no <header>. Verifies that
+  parse_and_validate raises SchemaValidationError and the consumer
+  emits a system_error with error_code=invalid_xml_format.
+-->
+<message>
+  <body>
+    <system>facturatie</system>
+    <status>down</status>
+  </body>
+</message>
