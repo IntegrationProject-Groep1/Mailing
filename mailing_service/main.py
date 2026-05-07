@@ -158,9 +158,10 @@ def run() -> None:
             channel.queue_declare(queue=ALERT_QUEUE, durable=True)
             channel.queue_declare(queue=CRM_SEND_MAILING_QUEUE, durable=True)
             channel.queue_declare(queue=FACTURATIE_SEND_MAILING_QUEUE, durable=True)
-            # Queue we own and publish to (errors). crm.incoming is owned
-            # by CRM and intentionally NOT declared here.
+            # Queues we publish to. crm.incoming is owned by CRM but we declare
+            # it here to ensure it exists before the first publish.
             channel.queue_declare(queue=MAILING_ERROR_QUEUE, durable=True)
+            channel.queue_declare(queue="crm.incoming", durable=True)
 
             channel.basic_qos(prefetch_count=1)
 
