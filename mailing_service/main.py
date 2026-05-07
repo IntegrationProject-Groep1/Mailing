@@ -1,4 +1,4 @@
-"""Mailing service consumer.
+﻿"""Mailing service consumer.
 
 Consumes alert XML messages from RabbitMQ and dispatches them to the
 appropriate handler. The only flow currently wired up is the monitoring
@@ -84,9 +84,10 @@ def _build_callback(schema: etree.XMLSchema):
             ch.basic_ack(delivery_tag)
             return
 
-        system = doc.findtext("system")
-        status = doc.findtext("status")
-        timestamp = doc.findtext("timestamp")
+        # v2.3 Standard parsing (body/system, body/status, header/timestamp)
+        system = doc.findtext(".//system")
+        status = doc.findtext(".//status")
+        timestamp = doc.findtext(".//header/timestamp")
 
         try:
             handlers.handle_alert(system, status, timestamp)
