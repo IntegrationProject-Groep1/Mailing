@@ -24,6 +24,9 @@ ERROR_QUEUE = "mailing.errors"
 # the wire string.
 INVALID_XML_FORMAT = "invalid_xml_format"
 UNKNOWN_MESSAGE_TYPE = "unknown_message_type"
+# Phase 2 escalations — surface platform-level outages so Operations can react.
+SENDGRID_UNAVAILABLE = "sendgrid_unavailable"
+BROKER_OUTAGE = "broker_outage"
 
 
 def _now_utc() -> str:

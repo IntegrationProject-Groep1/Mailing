@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ERROR example — SendGrid rejected one specific batch. Service is still
+  healthy and will keep processing; this single message went to a failed
+  mailing_status response. The error_code matches what's reported in the
+  per-team error queue (mailing.errors) for cross-referencing.
+-->
+<message>
+  <header>
+    <message_id>e5f6a7b8-c9d0-1234-efab-234567890004</message_id>
+    <timestamp>2026-05-15T19:02:33Z</timestamp>
+    <source>mailing</source>
+    <type>log</type>
+    <version>2.0</version>
+    <correlation_id>c3d4e5f6-a7b8-9012-cdef-012345678902</correlation_id>
+  </header>
+  <body>
+    <level>ERROR</level>
+    <action>sendgrid_dispatch</action>
+    <logger>mailing_service.sendgrid_client</logger>
+    <message>SendGrid 4xx rejected batch: invalid recipient address syntax</message>
+    <context>
+      <entry key="campaign_id">sg-campaign-0091</entry>
+      <entry key="status_code">400</entry>
+      <entry key="rejected_count">1</entry>
+      <entry key="error_code">invalid_xml_format</entry>
+    </context>
+  </body>
+</message>

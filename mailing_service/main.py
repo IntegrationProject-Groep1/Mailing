@@ -10,7 +10,9 @@ from lxml import etree
 import envelope
 from consumers import send_mailing as send_mailing_consumer
 from consumers import system_alert as system_alert_consumer
+from failure_tracker import SlidingWindowFailureTracker
 from publishers import system_error
+from publishers.logs import RabbitMQLogHandler
 from sendgrid_client import SendGridError
 
 ALERT_QUEUE = "monitoring.alerts"
@@ -22,6 +24,13 @@ CONNECT_RETRIES = 10
 CONNECT_DELAY_SECONDS = 2
 NACK_BACKOFF_SECONDS = 2
 
+# Escalation thresholds for SendGrid outages. A single 5xx is a normal
+# transient failure (handled by nack-requeue); 3+ in 60s is a platform
+# problem that Operations needs to know about.
+_SENDGRID_FAILURES = SlidingWindowFailureTracker(
+    window_seconds=60.0, threshold=3, cooldown_seconds=300.0,
+)
+
 log = logging.getLogger("mailing_service")
 
 
@@ -30,6 +39,26 @@ def _configure_logging() -> None:
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
     )
+
+
+def _enable_log_queue_handler() -> None:
+    """Attach RabbitMQLogHandler to the root logger if LOG_QUEUE_ENABLED.
+
+    Off by default until the platform team's logs.xsd is signed off and
+    we've verified the publisher behaves under broker-outage conditions
+    in staging. Always runs alongside the default StreamHandler — never
+    instead of it.
+    """
+    if os.getenv("LOG_QUEUE_ENABLED", "false").lower() != "true":
+        return
+    level_name = os.getenv("LOG_QUEUE_LEVEL", "WARNING").upper()
+    level = getattr(logging, level_name, logging.WARNING)
+    handler = RabbitMQLogHandler(
+        connection_factory=lambda: pika.BlockingConnection(_connection_parameters()),
+        level=level,
+    )
+    logging.getLogger().addHandler(handler)
+    log.info("RabbitMQLogHandler attached at level %s", level_name)
 
 
 def _connection_parameters() -> pika.ConnectionParameters:
@@ -111,7 +140,24 @@ def _build_callback(schema: etree.XMLSchema, handler, *, pass_channel: bool):
                 handler(env)
             ch.basic_ack(delivery_tag)
         except SendGridError as exc:
-            log.error("Transient send failure, requeueing: %s", exc)
+            log.error(
+                "Transient send failure, requeueing: %s", exc,
+                extra={"action": "sendgrid_dispatch"},
+            )
+            if _SENDGRID_FAILURES.record_failure():
+                # 3+ failures in 60s — escalate to mailing.errors so
+                # Monitoring can flag the SendGrid integration as
+                # degraded. The single message keeps requeueing as
+                # normal; this is purely a heads-up.
+                system_error.publish(
+                    ch,
+                    error_code=system_error.SENDGRID_UNAVAILABLE,
+                    error_description=(
+                        "SendGrid 5xx/network failures crossed 3-in-60s "
+                        f"threshold (latest: {exc})"
+                    ),
+                    related_message_id=env.message_id if 'env' in locals() else None,
+                )
             ch.basic_nack(delivery_tag, requeue=True)
             time.sleep(NACK_BACKOFF_SECONDS)
         except RuntimeError as exc:
@@ -146,6 +192,13 @@ def run() -> None:
     system_alert_schema = _load_schema("system_alert")
     send_mailing_schema = _load_schema("send_mailing")
 
+    # Tracks whether we just recovered from an unplanned disconnect.
+    # First pass through the loop is a clean startup (False). Set True
+    # by the AMQPConnectionError handler so the next successful connect
+    # publishes a system_error.
+    recovering_from_outage = False
+    outage_started_at: float | None = None
+
     while True:
         connection = connect()
         try:
@@ -162,6 +215,29 @@ def run() -> None:
             # it here to ensure it exists before the first publish.
             channel.queue_declare(queue=MAILING_ERROR_QUEUE, durable=True)
             channel.queue_declare(queue="crm.incoming", durable=True)
+
+            if recovering_from_outage:
+                # We came back online after a broker outage. Surface it to
+                # Monitoring before resuming consumption — this is the
+                # FATAL-equivalent the plan calls for in §2.4.
+                duration_s = (
+                    time.monotonic() - outage_started_at
+                    if outage_started_at is not None else 0.0
+                )
+                log.critical(
+                    "Recovered from broker outage after %.1fs", duration_s,
+                    extra={"action": "broker_connect"},
+                )
+                system_error.publish(
+                    channel,
+                    error_code=system_error.BROKER_OUTAGE,
+                    error_description=(
+                        f"mailing service recovered from broker outage "
+                        f"after {duration_s:.1f}s"
+                    ),
+                )
+                recovering_from_outage = False
+                outage_started_at = None
 
             channel.basic_qos(prefetch_count=1)
 
@@ -196,7 +272,15 @@ def run() -> None:
             log.info("Consumer stopped cleanly, exiting")
             return
         except (pika.exceptions.AMQPConnectionError, pika.exceptions.ChannelClosedByBroker) as exc:
-            log.error("Broker connection lost: %s. Reconnecting...", exc)
+            log.error(
+                "Broker connection lost: %s. Reconnecting...", exc,
+                extra={"action": "broker_disconnect"},
+            )
+            if not recovering_from_outage:
+                # First disconnect of this outage; start the clock so the
+                # post-recovery system_error can report duration.
+                outage_started_at = time.monotonic()
+            recovering_from_outage = True
             try:
                 connection.close()
             except Exception:
@@ -206,6 +290,7 @@ def run() -> None:
 
 def main() -> None:
     _configure_logging()
+    _enable_log_queue_handler()
     try:
         run()
     except Exception:
