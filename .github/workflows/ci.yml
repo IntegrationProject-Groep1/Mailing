@@ -1,0 +1,122 @@
+# Pull-request and feature-branch CI for the mailing service.
+#
+# What this catches BEFORE merge:
+#   * import errors / undefined names anywhere in the package
+#   * malformed XSDs (won't load via lxml)
+#   * test fixtures that no longer validate against their schema (or
+#     negative fixtures that *start* validating, which is how schema drift
+#     usually shows up first)
+#
+# What it does NOT catch (deliberate — these are integration concerns):
+#   * SendGrid behaviour
+#   * RabbitMQ broker availability
+
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r mailing_service/requirements.txt
+
+      - name: Import-check every module
+        env:
+          SCHEMAS_DIR: ${{ github.workspace }}/mailing_service/schemas
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, "mailing_service")
+          import main, envelope, templates, sendgrid_client, failure_tracker
+          from consumers import system_alert, send_mailing
+          from publishers import system_error, mailing_status, logs as logs_publisher
+          print("All modules import cleanly.")
+          PY
+
+      - name: Validate XSDs parse
+        run: |
+          python - <<'PY'
+          from lxml import etree
+          import pathlib
+          for xsd in pathlib.Path("mailing_service/schemas").glob("*.xsd"):
+              etree.XMLSchema(etree.parse(str(xsd)))
+              print(f"  parses: {xsd}")
+          PY
+
+      - name: Validate XSD examples conform
+        run: |
+          python - <<'PY'
+          from lxml import etree
+          import pathlib
+          schema = etree.XMLSchema(etree.parse("mailing_service/schemas/logs.xsd"))
+          ok = True
+          for x in sorted(pathlib.Path("mailing_service/schemas/examples").glob("logs_*.xml")):
+              if not schema.validate(etree.parse(str(x))):
+                  print(f"FAIL: {x}: {schema.error_log}")
+                  ok = False
+              else:
+                  print(f"  valid: {x}")
+          import sys
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Validate test fixtures match expected schema verdicts
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, "mailing_service")
+          sys.path.insert(0, "test")
+          from lxml import etree
+          import test_messages as tm
+
+          schemas = {
+              "monitoring.alerts":        etree.XMLSchema(etree.parse("mailing_service/schemas/system_alert.xsd")),
+              "crm.to.mailing":           etree.XMLSchema(etree.parse("mailing_service/schemas/send_mailing.xsd")),
+              "facturatie.to.mailing":    etree.XMLSchema(etree.parse("mailing_service/schemas/send_mailing.xsd")),
+          }
+          # Negative fixtures: known-bad payloads our consumer must reject.
+          NEGATIVES = {"legacy_alert", "malformed_envelope_missing_header", "crm_send_mailing_unknown_type"}
+
+          ok = True
+          for name, (queue, build) in tm.SCENARIOS.items():
+              body = build()
+              try:
+                  doc = etree.fromstring(body, etree.XMLParser(huge_tree=True))
+              except etree.XMLSyntaxError as e:
+                  if name not in NEGATIVES:
+                      print(f"FAIL: {name}: unexpected XML syntax error: {e}")
+                      ok = False
+                  else:
+                      print(f"  ok (rejected at parse): {name}")
+                  continue
+              schema = schemas.get(queue)
+              if schema is None:
+                  print(f"  skip (no schema): {name}")
+                  continue
+              valid = schema.validate(doc)
+              expected_valid = name not in NEGATIVES
+              if valid != expected_valid:
+                  print(f"FAIL: {name}: valid={valid} expected={expected_valid}")
+                  ok = False
+              else:
+                  print(f"  ok: {name} valid={valid}")
+          sys.exit(0 if ok else 1)
+          PY
