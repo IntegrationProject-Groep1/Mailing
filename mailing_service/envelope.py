@@ -50,6 +50,9 @@ def parse_and_validate(raw: bytes, schema: etree.XMLSchema) -> Envelope:
     :class:`SchemaValidationError` when the document does not conform to
     the supplied schema.
     """
+    if len(raw) > 50 * 1024 * 1024:  # 50 MB safety limit
+        raise MalformedXMLError(f"Payload size {len(raw)} exceeds safety limit")
+
     try:
         doc = etree.fromstring(raw, _PARSER)
     except etree.XMLSyntaxError as exc:
