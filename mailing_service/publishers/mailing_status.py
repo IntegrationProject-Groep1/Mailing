@@ -37,7 +37,7 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _build_xml(
+def _build_element(
     *,
     correlation_id: str | None,
     campaign_id: str,
@@ -48,7 +48,7 @@ def _build_xml(
     opened: int,
     bounced_emails: list[str] | None,
     status: Status,
-) -> bytes:
+) -> etree._Element:
     root = etree.Element("message")
 
     header = etree.SubElement(root, "header")
@@ -73,7 +73,7 @@ def _build_xml(
             etree.SubElement(be_el, "email").text = email
     etree.SubElement(body, "status").text = status
 
-    return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+    return root
 
 
 _SCHEMA: etree.XMLSchema | None = None
@@ -107,7 +107,7 @@ def publish(
     raise :class:`RuntimeError` because they indicate a bug in our code,
     not a runtime/transport issue.
     """
-    raw = _build_xml(
+    root = _build_element(
         correlation_id=correlation_id,
         campaign_id=campaign_id,
         subject=subject,
@@ -119,7 +119,7 @@ def publish(
         status=status,
     )
 
-    if not _schema().validate(etree.fromstring(raw)):
+    if not _schema().validate(root):
         # Our own builder produced an invalid envelope — fail loudly so
         # we catch the bug in CI/staging, not in front of CRM.
         raise RuntimeError(
@@ -129,7 +129,7 @@ def publish(
     channel.basic_publish(
         exchange="",
         routing_key=CRM_INCOMING_QUEUE,
-        body=raw,
+        body=etree.tostring(root, xml_declaration=True, encoding="UTF-8"),
         properties=pika.BasicProperties(delivery_mode=2),
     )
     log.info(

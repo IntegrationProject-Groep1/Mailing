@@ -11,7 +11,6 @@
   <body>
     <campaign_id>sg-campaign-test-001</campaign_id>
     <subject>Bevestiging inschrijving Shiftfestival 2026</subject>
-    <template_id>tmpl-registration-confirm</template_id>
     <mail_type>registration_confirmation</mail_type>
     <recipients>
       <recipient>

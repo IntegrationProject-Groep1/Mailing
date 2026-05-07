@@ -30,7 +30,7 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _build_xml(error_code: str, error_description: str, related_message_id: str | None) -> bytes:
+def _build_element(error_code: str, error_description: str, related_message_id: str | None) -> etree._Element:
     root = etree.Element("message")
     header = etree.SubElement(root, "header")
     etree.SubElement(header, "message_id").text = str(uuid.uuid4())
@@ -45,7 +45,7 @@ def _build_xml(error_code: str, error_description: str, related_message_id: str 
     if related_message_id:
         etree.SubElement(body, "related_message_id").text = related_message_id
 
-    return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+    return root
 
 
 def _load_schema() -> etree.XMLSchema:
@@ -78,12 +78,12 @@ def publish(
     and swallow rather than raise: a failed error-publish must not also
     take down the consumer that triggered it.
     """
-    raw = _build_xml(error_code, error_description, related_message_id)
+    root = _build_element(error_code, error_description, related_message_id)
 
     # Self-validation: the schema constrains source/type/version, so this
     # catches accidental drift in our own code path (e.g., enum changes).
     try:
-        if not _schema().validate(etree.fromstring(raw)):
+        if not _schema().validate(root):
             log.error(
                 "system_error self-validation failed; not publishing: %s",
                 _schema().error_log,
@@ -97,7 +97,7 @@ def publish(
         channel.basic_publish(
             exchange="",
             routing_key=ERROR_QUEUE,
-            body=raw,
+            body=etree.tostring(root, xml_declaration=True, encoding="UTF-8"),
             properties=pika.BasicProperties(delivery_mode=2),
         )
         log.warning(

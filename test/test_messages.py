@@ -76,7 +76,6 @@ def _build_oversized_send_mailing() -> bytes:
   <body>
     <campaign_id>sg-campaign-oversized</campaign_id>
     <subject>Test oversized attachment</subject>
-    <template_id>tmpl-x</template_id>
     <mail_type>general_announcement</mail_type>
     <recipients>
       <recipient>
