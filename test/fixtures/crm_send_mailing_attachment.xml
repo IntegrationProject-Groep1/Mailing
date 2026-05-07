@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<message>
+  <header>
+    <message_id>{{MESSAGE_ID}}</message_id>
+    <timestamp>{{TIMESTAMP}}</timestamp>
+    <source>crm</source>
+    <type>send_mailing</type>
+    <version>2.0</version>
+    <correlation_id>{{CORRELATION_ID}}</correlation_id>
+  </header>
+  <body>
+    <campaign_id>sg-campaign-invoice-002</campaign_id>
+    <subject>Uw factuur voor Shiftfestival 2026</subject>
+    <mail_type>invoice_ready</mail_type>
+    <recipients>
+      <recipient>
+        <email>jan.peeters@example.test</email>
+        <user_id>e8b27c1d-4f2a-4b3e-9c5f-123456789abc</user_id>
+        <contact>
+          <first_name>Jan</first_name>
+          <last_name>Peeters</last_name>
+        </contact>
+      </recipient>
+      <recipient>
+        <email>marie.desmet@example.test</email>
+        <user_id>f9c38d2e-5f3b-4c4f-ad6f-234567890bcd</user_id>
+        <contact>
+          <first_name>Marie</first_name>
+          <last_name>Desmet</last_name>
+        </contact>
+      </recipient>
+    </recipients>
+    <template_data>{"invoice_id":"foss-inv-00142","amount":"31.50","currency":"eur","due_date":"2026-06-15"}</template_data>
+    <attachment>
+      <filename>invoice-00142.pdf</filename>
+      <content_type>application/pdf</content_type>
+      <!-- Tiny base64-encoded PDF stand-in (not a real PDF; SendGrid sandbox accepts any bytes). -->
+      <base64_data>JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4KJSVFT0YK</base64_data>
+    </attachment>
+  </body>
+</message>
