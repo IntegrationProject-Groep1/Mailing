@@ -10,7 +10,14 @@ Python service that consumes v2.0 platform-contract messages from the shared Rab
 | 2 | CRM | `crm.to.mailing` | `crm.incoming` (`mailing_status`) | Transactional email via SendGrid Dynamic Template (contract §12.1) |
 | 3 | Facturatie | `facturatie.to.mailing` | `crm.incoming` (`mailing_status`) | Same template flow as CRM, different source (contract §13.1) |
 
-Every inbound message that fails XML parsing or schema validation, plus a few permanent application-level failures, also produces a `system_error` (contract §2.6) on `mailing.errors` so Monitoring sees contract drift in real time.
+Every inbound message that fails XML parsing or schema validation, plus a few permanent application-level failures, also produces a `system_error` (contract §2.6) on `mailing.errors` so Monitoring sees contract drift in real time. Two additional escalations fire automatically:
+
+- **`sendgrid_unavailable`** when 3+ SendGrid 5xx/network failures land within 60 s. Suppressed for a 5-minute cooldown afterwards so a sustained outage doesn't spam the queue.
+- **`broker_outage`** the first time we successfully reconnect after losing the broker connection. Includes the outage duration in the description.
+
+Routine operational events (WARN+) can additionally be forwarded to the shared `logs` queue (contract §17, schema proposed in [mailing_service/schemas/logs.xsd](mailing_service/schemas/logs.xsd)). Off by default; set `LOG_QUEUE_ENABLED=true` to enable. The publisher uses a dedicated broker connection on a daemon thread with a bounded buffer — log emit never blocks the consumer thread, even during broker outages.
+
+Heartbeats are out of scope for this repo (Sidecar Principle, contract §3.1) — the platform's deployment workflow attaches the heartbeat sidecar; nothing in this codebase or its `docker-compose.yml` references it.
 
 ## Message shape (v2.0 envelope)
 
