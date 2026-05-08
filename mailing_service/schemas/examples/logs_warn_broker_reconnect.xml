@@ -13,7 +13,7 @@
     <version>2.0</version>
   </header>
   <body>
-    <level>WARN</level>
+    <level>warning</level>
     <action>broker_disconnect</action>
     <logger>mailing_service.main</logger>
     <message>Broker connection lost: ConnectionResetError(104, 'Connection reset by peer'). Reconnecting in 2s.</message>

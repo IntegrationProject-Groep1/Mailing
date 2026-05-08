@@ -15,7 +15,7 @@
     <recipients>
       <recipient>
         <email>jan.peeters@example.test</email>
-        <user_id>e8b27c1d-4f2a-4b3e-9c5f-123456789abc</user_id>
+        <identity_uuid>e8b27c1d-4f2a-4b3e-9c5f-123456789abc</identity_uuid>
         <contact>
           <first_name>Jan</first_name>
           <last_name>Peeters</last_name>

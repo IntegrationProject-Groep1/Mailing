@@ -1,15 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<message>
-  <header>
-    <message_id>{{MESSAGE_ID}}</message_id>
-    <timestamp>{{TIMESTAMP}}</timestamp>
-    <source>monitoring</source>
-    <type>system_alert</type>
-    <version>2.0</version>
-  </header>
-  <body>
-    <system>facturatie</system>
-    <status>offline</status>
-    <last_seen>{{TIMESTAMP}}</last_seen>
-  </body>
-</message>
+<alert>
+  <type>HEARTBEAT_CRITICAL</type>
+  <system>facturatie</system>
+  <message>Heartbeat timeout: facturatie has not responded and is considered offline</message>
+  <timestamp>{{TIMESTAMP}}</timestamp>
+</alert>
