@@ -44,7 +44,6 @@
               <xs:element name="sent"        type="xs:integer"/>
               <xs:element name="delivered"   type="xs:integer"/>
               <xs:element name="bounced"     type="xs:integer"/>
-              <xs:element name="opened"      type="xs:integer"/>
               <xs:element name="bounced_emails" minOccurs="0">
                 <xs:complexType>
                   <xs:sequence>
@@ -52,6 +51,7 @@
                   </xs:sequence>
                 </xs:complexType>
               </xs:element>
+              <xs:element name="opened"      type="xs:integer"/>
               <xs:element name="status">
                 <xs:simpleType><xs:restriction base="xs:string">
                   <xs:enumeration value="completed"/>
