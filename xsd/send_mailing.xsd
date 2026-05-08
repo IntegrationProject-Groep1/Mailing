@@ -15,7 +15,7 @@
   <xs:complexType name="RecipientType">
     <xs:sequence>
       <xs:element name="email"   type="xs:string"/>
-      <xs:element name="identity_uuid" type="xs:string"/>
+      <xs:element name="user_id" type="xs:string"/>
       <xs:element name="contact" type="ContactType"/>
     </xs:sequence>
   </xs:complexType>

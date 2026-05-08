@@ -15,7 +15,7 @@ from publishers import system_error
 from publishers.logs import RabbitMQLogHandler
 from sendgrid_client import SendGridError
 
-ALERT_QUEUE = "monitoring.alerts"
+ALERT_QUEUE = "to_mailing"
 CRM_SEND_MAILING_QUEUE = "crm.to.mailing"
 FACTURATIE_SEND_MAILING_QUEUE = "facturatie.to.mailing"
 MAILING_ERROR_QUEUE = system_error.ERROR_QUEUE   # "mailing.errors"
@@ -100,13 +100,12 @@ def _load_schema(name: str) -> etree.XMLSchema:
 
 
 def _build_callback(schema: etree.XMLSchema, handler, *, pass_channel: bool):
-    """Build a per-queue callback that validates + dispatches.
+    """Build a per-queue callback that validates + dispatches standard envelopes.
 
-    ``handler`` takes either ``(env)`` (system_alert flow) or
-    ``(env, channel)`` (send_mailing flow) — controlled by ``pass_channel``.
-    On envelope-format failures we publish a ``system_error`` and ack;
-    on transient SendGrid failures we nack-requeue; on permanent failures
-    we ack (the handler already published the appropriate response).
+    ``handler`` takes either ``(env)`` or ``(env, channel)`` — controlled by
+    ``pass_channel``. On envelope-format failures we publish a ``system_error``
+    and ack; on transient SendGrid failures we nack-requeue; on permanent
+    failures we ack (the handler already published the appropriate response).
     """
     def on_message(ch, method, _properties, body):
         delivery_tag = method.delivery_tag
@@ -145,10 +144,6 @@ def _build_callback(schema: etree.XMLSchema, handler, *, pass_channel: bool):
                 extra={"action": "sendgrid_dispatch"},
             )
             if _SENDGRID_FAILURES.record_failure():
-                # 3+ failures in 60s — escalate to mailing.errors so
-                # Monitoring can flag the SendGrid integration as
-                # degraded. The single message keeps requeueing as
-                # normal; this is purely a heads-up.
                 system_error.publish(
                     ch,
                     error_code=system_error.SENDGRID_UNAVAILABLE,
@@ -165,6 +160,43 @@ def _build_callback(schema: etree.XMLSchema, handler, *, pass_channel: bool):
             ch.basic_ack(delivery_tag)
         except Exception:
             log.exception("Unexpected error handling message; discarding")
+            ch.basic_ack(delivery_tag)
+
+    return on_message
+
+
+def _build_alert_callback(schema: etree.XMLSchema):
+    """Build a callback for the flat-<alert> system_alert queue (contract §4).
+
+    The Monitoring→Mailing alert flow uses a flat ``<alert>`` root rather
+    than the standard ``<message>`` envelope (sanctioned exception, §4).
+    Validation and parsing are delegated to the consumer so we stay simple
+    here: ack unconditionally (a malformed alert must not block the queue),
+    nack-requeue only on transient SendGrid errors.
+    """
+    def on_message(ch, method, _properties, body):
+        delivery_tag = method.delivery_tag
+        try:
+            system_alert_consumer.handle(body, schema)
+            ch.basic_ack(delivery_tag)
+        except SendGridError as exc:
+            log.error(
+                "Transient send failure on alert, requeueing: %s", exc,
+                extra={"action": "consume_system_alert"},
+            )
+            if _SENDGRID_FAILURES.record_failure():
+                system_error.publish(
+                    ch,
+                    error_code=system_error.SENDGRID_UNAVAILABLE,
+                    error_description=(
+                        "SendGrid 5xx/network failures crossed 3-in-60s "
+                        f"threshold (latest: {exc})"
+                    ),
+                )
+            ch.basic_nack(delivery_tag, requeue=True)
+            time.sleep(NACK_BACKOFF_SECONDS)
+        except Exception:
+            log.exception("Unexpected error handling alert; discarding")
             ch.basic_ack(delivery_tag)
 
     return on_message
@@ -243,9 +275,7 @@ def run() -> None:
 
             channel.basic_consume(
                 queue=ALERT_QUEUE,
-                on_message_callback=_build_callback(
-                    system_alert_schema, system_alert_consumer.handle, pass_channel=False,
-                ),
+                on_message_callback=_build_alert_callback(system_alert_schema),
                 auto_ack=False,
             )
             channel.basic_consume(

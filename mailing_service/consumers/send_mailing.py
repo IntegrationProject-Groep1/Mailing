@@ -44,7 +44,7 @@ def _parse_recipients(body) -> list[sendgrid_client.Recipient]:
         out.append(
             sendgrid_client.Recipient(
                 email=r.findtext("email") or "",
-                user_id=r.findtext("user_id") or "",
+                user_id=r.findtext("identity_uuid") or r.findtext("user_id") or "",
                 first_name=(contact.findtext("first_name") if contact is not None else "") or "",
                 last_name=(contact.findtext("last_name") if contact is not None else "") or "",
             )

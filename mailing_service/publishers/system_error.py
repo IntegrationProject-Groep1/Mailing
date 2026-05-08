@@ -37,9 +37,9 @@ def _build_element(error_code: str, error_description: str, related_message_id: 
     root = etree.Element("message")
     header = etree.SubElement(root, "header")
     etree.SubElement(header, "message_id").text = str(uuid.uuid4())
-    etree.SubElement(header, "type").text = "system_error"
-    etree.SubElement(header, "source").text = "mailing"
     etree.SubElement(header, "timestamp").text = _now_utc()
+    etree.SubElement(header, "source").text = "mailing"
+    etree.SubElement(header, "type").text = "system_error"
     etree.SubElement(header, "version").text = "2.0"
 
     body = etree.SubElement(root, "body")
