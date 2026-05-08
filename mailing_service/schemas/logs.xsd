@@ -1,112 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  ============================================================================
-  Logs queue (`logs`) — proposed v2.0 envelope for routine operational
-  events from each service to the Monitoring team's Logstash pipeline.
-
-  Status: PROPOSED. Contract section 17 names a `logs` queue but does not
-  define a body shape. This schema is the mailing team's proposal; final
-  approval rests with the platform team. All teams should use the same
-  shape so Logstash can parse without per-source branching.
-
-  ============================================================================
-  Field semantics
-  ============================================================================
-
-  HEADER — exactly the standard v2.0 envelope (contract §2):
-
-    message_id     UUID-shaped identifier of THIS log record.
-    timestamp      ISO-8601 UTC. The moment the event happened, NOT when
-                   the publisher drained its buffer. Use the value at
-                   `logging.LogRecord.created`, not now().
-    source         Which service produced the record. Use the standard
-                   SourceType enum from the contract.
-    type           Always "log" — distinguishes routine logs from the
-                   alarming `system_error` (§2.6) which goes to a
-                   per-team error queue, not to `logs`.
-    version        "2.0".
-    correlation_id Optional. Set when the log record can be tied to a
-                   business message_id (e.g. the consume_send_mailing
-                   action of one specific campaign). Lets Logstash join
-                   logs across services for one logical request.
-
-  BODY:
-
-    level    INFO  — Routine successful operation worth recording. Examples:
-                     "campaign sent", "broker reconnected", "service ready".
-                     Should NOT be the default — most code paths produce no
-                     log at all. INFO records survive in the pipeline; pick
-                     them deliberately.
-             WARN  — Recoverable anomaly. The current operation succeeded
-                     OR will succeed after retry. Examples: "broker
-                     disconnect, reconnecting", "SendGrid 5xx (1/3)",
-                     "config field X missing, falling back to default".
-             ERROR — Failure of a single message/operation; the service
-                     itself is still healthy and processing other work.
-                     Examples: "send_mailing rejected by SendGrid 4xx",
-                     "XSD validation failed for inbound message".
-             FATAL — Service cannot make progress. Examples: "broker
-                     unreachable after 10 retries", "required env var
-                     SENDGRID_API_KEY unset". A FATAL event is usually
-                     paired with a `system_error` publish to the team-
-                     specific error queue; FATAL on `logs` is for the
-                     Logstash pipeline, `system_error` is for the alert
-                     pipeline.
-
-    action   Short verb-phrase, lowercase_snake_case, naming WHAT the
-             service was doing when the event fired. This is the primary
-             grouping key for Logstash dashboards — keep the vocabulary
-             stable and small. Examples used by mailing_service:
-
-               consume_system_alert      consume_send_mailing
-               publish_mailing_status    publish_system_error
-               publish_log               sendgrid_dispatch
-               broker_connect            broker_disconnect
-               load_schema               startup
-               shutdown
-
-             Always present, always lowercase. New actions should be
-             added intentionally (search the codebase first; if a
-             similar one exists, reuse it).
-
-    logger   Python dotted module path emitting the record. Equivalent
-             to `logging.LogRecord.name`. Useful for grep, but `action`
-             is the dashboard grouping key. Example:
-             "mailing_service.consumers.send_mailing".
-
-    message  Free-text human-readable description. Hard cap 4 KB so
-             stack traces fit; longer details belong in `context`.
-
-    context  Optional. Zero or more `<entry key="...">value</entry>`
-             pairs carrying structured fields a dashboard might index
-             (campaign_id, recipient_count, error_code, etc.). Keys
-             SHOULD be lowercase_snake_case; values are free strings
-             (numbers must be stringified). Avoid putting PII here.
-
-  ============================================================================
--->
-<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
-
-  <xs:simpleType name="SourceType">
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="UUIDType">
     <xs:restriction base="xs:string">
-      <xs:enumeration value="frontend"/>
-      <xs:enumeration value="crm"/>
-      <xs:enumeration value="kassa"/>
-      <xs:enumeration value="planning"/>
-      <xs:enumeration value="facturatie"/>
-      <xs:enumeration value="mailing"/>
-      <xs:enumeration value="monitoring"/>
-      <xs:enumeration value="identity-service"/>
+      <xs:pattern value="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"/>
     </xs:restriction>
   </xs:simpleType>
-
-  <xs:complexType name="ContextEntryType">
-    <xs:simpleContent>
-      <xs:extension base="xs:string">
-        <xs:attribute name="key" type="xs:string" use="required"/>
-      </xs:extension>
-    </xs:simpleContent>
-  </xs:complexType>
 
   <xs:element name="message">
     <xs:complexType>
@@ -114,55 +12,57 @@
         <xs:element name="header">
           <xs:complexType>
             <xs:sequence>
-              <xs:element name="message_id" type="xs:string"/>
-              <xs:element name="timestamp"  type="xs:dateTime"/>
-              <xs:element name="source"     type="SourceType"/>
-              <xs:element name="type">
+              <xs:element name="message_id" type="UUIDType"/>
+              <xs:element name="timestamp" type="xs:dateTime"/>
+              <xs:element name="source">
                 <xs:simpleType><xs:restriction base="xs:string">
-                  <xs:enumeration value="log"/>
+                  <xs:enumeration value="crm"/>
+                  <xs:enumeration value="kassa"/>
+                  <xs:enumeration value="facturatie"/>
+                  <xs:enumeration value="frontend"/>
+                  <xs:enumeration value="planning"/>
+                  <xs:enumeration value="mailing"/>
+                  <xs:enumeration value="identity-service"/>
+                  <xs:enumeration value="iot_gateway"/>
                 </xs:restriction></xs:simpleType>
               </xs:element>
-              <xs:element name="version">
-                <xs:simpleType><xs:restriction base="xs:string">
-                  <xs:enumeration value="2.0"/>
-                </xs:restriction></xs:simpleType>
-              </xs:element>
-              <xs:element name="correlation_id" type="xs:string" minOccurs="0"/>
+              <xs:element name="type" type="xs:string" fixed="log"/>
+              <xs:element name="version" type="xs:string" fixed="2.0"/>
             </xs:sequence>
           </xs:complexType>
         </xs:element>
-
         <xs:element name="body">
           <xs:complexType>
             <xs:sequence>
               <xs:element name="level">
                 <xs:simpleType><xs:restriction base="xs:string">
-                  <xs:enumeration value="INFO"/>
-                  <xs:enumeration value="WARN"/>
-                  <xs:enumeration value="ERROR"/>
-                  <xs:enumeration value="FATAL"/>
+                  <xs:enumeration value="info"/>
+                  <xs:enumeration value="warning"/>
+                  <xs:enumeration value="error"/>
                 </xs:restriction></xs:simpleType>
               </xs:element>
               <xs:element name="action">
                 <xs:simpleType><xs:restriction base="xs:string">
-                  <xs:minLength value="1"/>
+                  <xs:enumeration value="registration"/>
+                  <xs:enumeration value="user"/>
+                  <xs:enumeration value="payment"/>
+                  <xs:enumeration value="invoice"/>
+                  <xs:enumeration value="session"/>
+                  <xs:enumeration value="calendar"/>
+                  <xs:enumeration value="email"/>
+                  <xs:enumeration value="wallet"/>
+                  <xs:enumeration value="refund"/>
+                  <xs:enumeration value="identity"/>
+                  <xs:enumeration value="xml_validation"/>
+                  <xs:enumeration value="system_error"/>
+                  <xs:enumeration value="badge"/>
                 </xs:restriction></xs:simpleType>
               </xs:element>
-              <xs:element name="logger" type="xs:string"/>
               <xs:element name="message" type="xs:string"/>
-              <xs:element name="context" minOccurs="0">
-                <xs:complexType>
-                  <xs:sequence>
-                    <xs:element name="entry" type="ContextEntryType"
-                                minOccurs="0" maxOccurs="unbounded"/>
-                  </xs:sequence>
-                </xs:complexType>
-              </xs:element>
             </xs:sequence>
           </xs:complexType>
         </xs:element>
       </xs:sequence>
     </xs:complexType>
   </xs:element>
-
 </xs:schema>

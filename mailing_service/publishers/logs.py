@@ -22,9 +22,8 @@ guarantees, in priority order:
 Adding ``action`` and ``correlation_id`` from a log call::
 
     log.info("Dispatching campaign", extra={
-        "action": "sendgrid_dispatch",
+        "action": "email",
         "correlation_id": env.correlation_id,
-        "context": {"campaign_id": campaign_id, "recipient_count": 42},
     })
 
 Records without an ``action`` extra get a synthesised default from the
@@ -46,13 +45,19 @@ from lxml import etree
 LOG_QUEUE = "logs"
 DEFAULT_BUFFER_SIZE = 1000
 
-# Map Python logging levels → contract enum {INFO, WARN, ERROR, FATAL}.
+# Map Python logging levels to contract section 3.5 values.
 _LEVEL_MAP = {
-    logging.DEBUG:    "INFO",
-    logging.INFO:     "INFO",
-    logging.WARNING:  "WARN",
-    logging.ERROR:    "ERROR",
-    logging.CRITICAL: "FATAL",
+    logging.DEBUG:    "info",
+    logging.INFO:     "info",
+    logging.WARNING:  "warning",
+    logging.ERROR:    "error",
+    logging.CRITICAL: "error",
+}
+
+_VALID_ACTIONS = {
+    "registration", "user", "payment", "invoice", "session", "calendar",
+    "email", "wallet", "refund", "identity", "xml_validation",
+    "system_error", "badge",
 }
 
 # Don't recurse: any record produced by this module is dropped before emit.
@@ -83,24 +88,18 @@ def _record_to_xml(record: logging.LogRecord) -> bytes:
         etree.SubElement(header, "correlation_id").text = str(correlation_id)
 
     body = etree.SubElement(root, "body")
-    etree.SubElement(body, "level").text = _LEVEL_MAP.get(record.levelno, "INFO")
+    etree.SubElement(body, "level").text = _LEVEL_MAP.get(record.levelno, "info")
     # action: prefer the extra={"action": "..."}; fall back to the last
     # dotted segment of the logger name.
     action = getattr(record, "action", None) or record.name.rsplit(".", 1)[-1]
+    if action not in _VALID_ACTIONS:
+        action = "email"
     etree.SubElement(body, "action").text = str(action)
-    etree.SubElement(body, "logger").text = record.name
     msg = record.getMessage()
     if record.exc_info:
         # Append stack trace to message; logs.xsd allows arbitrary string.
         msg = f"{msg}\n{logging.Formatter().formatException(record.exc_info)}"
     etree.SubElement(body, "message").text = msg
-
-    context = getattr(record, "context", None)
-    if context:
-        ctx_el = etree.SubElement(body, "context")
-        for k, v in context.items():
-            entry = etree.SubElement(ctx_el, "entry", key=str(k))
-            entry.text = str(v)
 
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
