@@ -3,7 +3,7 @@ services:
   mailing_service:
     build:
       context: .
-      dockerfile: mailing_service/Dockerfile
+      dockerfile: Dockerfile
     container_name: mailing_service
     restart: unless-stopped
     env_file: .env
