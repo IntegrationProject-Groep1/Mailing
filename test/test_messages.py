@@ -27,7 +27,6 @@ QUEUE_CRM_SEND_MAILING = "crm.to.mailing"
 QUEUE_FACTURATIE_SEND_MAILING = "facturatie.to.mailing"
 QUEUE_CRM_INCOMING = "crm.incoming"
 QUEUE_MAILING_ERRORS = "mailing.errors"
-QUEUE_LOGS = "logs"
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
@@ -81,7 +80,7 @@ def _build_oversized_send_mailing() -> bytes:
     <recipients>
       <recipient>
         <email>jan@example.test</email>
-        <user_id>u1</user_id>
+        <identity_uuid>e8b27c1d-4f2a-4b3e-9c5f-123456789abc</identity_uuid>
         <contact><first_name>Jan</first_name><last_name>P</last_name></contact>
       </recipient>
     </recipients>
@@ -159,7 +158,6 @@ def _declare_queues(channel) -> None:
         QUEUE_FACTURATIE_SEND_MAILING,
         QUEUE_CRM_INCOMING,
         QUEUE_MAILING_ERRORS,
-        QUEUE_LOGS,
     ):
         channel.queue_declare(queue=q, durable=True)
 
@@ -199,9 +197,6 @@ def main() -> None:
                         help="After publishing, drain crm.incoming for --listen-seconds")
     parser.add_argument("--listen-mailing-errors", action="store_true",
                         help="After publishing, drain mailing.errors for --listen-seconds")
-    parser.add_argument("--listen-logs", action="store_true",
-                        help="After publishing, drain the shared logs queue for --listen-seconds. "
-                             "Requires LOG_QUEUE_ENABLED=true in the mailing service's .env.")
     parser.add_argument("--listen-seconds", type=float, default=5.0,
                         help="How long to drain response queues (default: 5)")
     args = parser.parse_args()
@@ -220,8 +215,6 @@ def main() -> None:
             _drain(channel, QUEUE_CRM_INCOMING, "mailing_status", args.listen_seconds)
         if args.listen_mailing_errors:
             _drain(channel, QUEUE_MAILING_ERRORS, "mailing_errors", args.listen_seconds)
-        if args.listen_logs:
-            _drain(channel, QUEUE_LOGS, "logs", args.listen_seconds)
     finally:
         connection.close()
     log.info("Done")
