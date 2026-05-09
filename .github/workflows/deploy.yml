@@ -1,0 +1,61 @@
+name: Deploy Pipeline
+
+on:
+  push:
+    branches: ["dev"]   # dev: build on every push, no tag required
+  workflow_run:
+    workflows: ["CI Pipeline"] # Must match the 'name' of your CI workflow exactly
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || github.event.workflow_run.head_sha }}
+
+      - name: Set Image Tag
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "tag=dev" >> $GITHUB_OUTPUT
+          else
+            # workflow_run triggered by a tag (e.g. v1.2.3) → prod
+            echo "tag=prod" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Lowercase repo name
+        id: repo_name
+        run: echo "value=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo_name.outputs.value }}:latest
+            ghcr.io/${{ steps.repo_name.outputs.value }}:${{ steps.vars.outputs.tag }}
+            ghcr.io/${{ steps.repo_name.outputs.value }}:${{ github.sha }}
