@@ -15,8 +15,6 @@ Every inbound message that fails XML parsing or schema validation, plus a few pe
 - **`sendgrid_unavailable`** when 3+ SendGrid 5xx/network failures land within 60 s. Suppressed for a 5-minute cooldown afterwards so a sustained outage doesn't spam the queue.
 - **`broker_outage`** the first time we successfully reconnect after losing the broker connection. Includes the outage duration in the description.
 
-Routine operational events (WARN+) can additionally be forwarded to the shared `logs` queue (contract §17, schema proposed in [mailing_service/schemas/logs.xsd](mailing_service/schemas/logs.xsd)). Off by default; set `LOG_QUEUE_ENABLED=true` to enable. The publisher uses a dedicated broker connection on a daemon thread with a bounded buffer — log emit never blocks the consumer thread, even during broker outages.
-
 Heartbeats are out of scope for this repo (Sidecar Principle, contract §3.1) — the platform's deployment workflow attaches the heartbeat sidecar; nothing in this codebase or its `docker-compose.yml` references it.
 
 ## Message shape (v2.0 envelope)
@@ -58,6 +56,7 @@ Adding a new mail_type: extend the `MailType` enum in [mailing_service/templates
 ```
 mailing/
 ├── docker-compose.yml          mailing_service deployment
+├── Dockerfile                  mailing_service image build
 ├── .env.example                copy to .env and fill in
 ├── mailing_service/
 │   ├── main.py                 connection lifecycle + 3× basic_consume
@@ -66,8 +65,7 @@ mailing/
 │   ├── publishers/             outbound publishers (mailing_status, system_error)
 │   ├── sendgrid_client.py      SendGrid wrapper (plain + template variants)
 │   ├── templates.py            mail_type → SendGrid template_id mapping
-│   ├── schemas/                v2.0 XSDs
-│   └── Dockerfile
+│   └── schemas/                v2.0 XSDs
 └── test/                       local-only test harness (RabbitMQ + publisher)
     ├── docker-compose.yml      test broker
     ├── test_messages.py        scenario publisher + response-queue drain

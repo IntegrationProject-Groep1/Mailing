@@ -12,7 +12,6 @@ from consumers import send_mailing as send_mailing_consumer
 from consumers import system_alert as system_alert_consumer
 from failure_tracker import SlidingWindowFailureTracker
 from publishers import system_error
-from publishers.logs import RabbitMQLogHandler
 from sendgrid_client import SendGridError
 
 ALERT_QUEUE = "to_mailing"
@@ -39,26 +38,6 @@ def _configure_logging() -> None:
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
     )
-
-
-def _enable_log_queue_handler() -> None:
-    """Attach RabbitMQLogHandler to the root logger if LOG_QUEUE_ENABLED.
-
-    Off by default until the platform team's logs.xsd is signed off and
-    we've verified the publisher behaves under broker-outage conditions
-    in staging. Always runs alongside the default StreamHandler — never
-    instead of it.
-    """
-    if os.getenv("LOG_QUEUE_ENABLED", "false").lower() != "true":
-        return
-    level_name = os.getenv("LOG_QUEUE_LEVEL", "WARNING").upper()
-    level = getattr(logging, level_name, logging.WARNING)
-    handler = RabbitMQLogHandler(
-        connection_factory=lambda: pika.BlockingConnection(_connection_parameters()),
-        level=level,
-    )
-    logging.getLogger().addHandler(handler)
-    log.info("RabbitMQLogHandler attached at level %s", level_name)
 
 
 def _connection_parameters() -> pika.ConnectionParameters:
@@ -320,7 +299,6 @@ def run() -> None:
 
 def main() -> None:
     _configure_logging()
-    _enable_log_queue_handler()
     try:
         run()
     except Exception:

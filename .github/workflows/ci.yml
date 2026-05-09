@@ -47,7 +47,7 @@ jobs:
           sys.path.insert(0, "mailing_service")
           import main, envelope, templates, sendgrid_client, failure_tracker
           from consumers import system_alert, send_mailing
-          from publishers import system_error, mailing_status, logs as logs_publisher
+          from publishers import system_error, mailing_status
           print("All modules import cleanly.")
           PY
 
@@ -59,23 +59,6 @@ jobs:
           for xsd in pathlib.Path("mailing_service/schemas").glob("*.xsd"):
               etree.XMLSchema(etree.parse(str(xsd)))
               print(f"  parses: {xsd}")
-          PY
-
-      - name: Validate XSD examples conform
-        run: |
-          python - <<'PY'
-          from lxml import etree
-          import pathlib
-          schema = etree.XMLSchema(etree.parse("mailing_service/schemas/logs.xsd"))
-          ok = True
-          for x in sorted(pathlib.Path("mailing_service/schemas/examples").glob("logs_*.xml")):
-              if not schema.validate(etree.parse(str(x))):
-                  print(f"FAIL: {x}: {schema.error_log}")
-                  ok = False
-              else:
-                  print(f"  valid: {x}")
-          import sys
-          sys.exit(0 if ok else 1)
           PY
 
       - name: Validate test fixtures match expected schema verdicts
