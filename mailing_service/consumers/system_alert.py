@@ -8,7 +8,7 @@ operator-facing and uses inline HTML).
 """
 
 import logging
-import os
+from html import escape
 
 import sendgrid_client
 from lxml import etree
@@ -16,35 +16,47 @@ from lxml import etree
 log = logging.getLogger(__name__)
 
 
+class AlertValidationError(Exception):
+    """Raised when a flat Monitoring alert is malformed or schema-invalid."""
+
+
+def parse_alert(raw_body: bytes, schema: etree.XMLSchema) -> tuple[str, str, str]:
+    """Validate a flat ``<alert>`` message and return system/message/timestamp."""
+    try:
+        root = etree.fromstring(raw_body)
+    except etree.XMLSyntaxError as exc:
+        raise AlertValidationError(f"malformed XML: {exc}") from exc
+
+    if not schema.validate(root):
+        raise AlertValidationError(f"schema validation failed: {schema.error_log}")
+
+    return (
+        root.findtext("system") or "",
+        root.findtext("message") or "",
+        root.findtext("timestamp") or "",
+    )
+
+
 def handle(raw_body: bytes, schema: etree.XMLSchema) -> None:
     """Validate and send an alert email for one flat ``<alert>`` message.
 
     Raises whatever ``sendgrid_client`` raises so the caller's nack/ack
-    policy stays the single point of truth. Returns normally on validation
-    failure (ack-and-discard — a malformed alert must not block the queue).
+    policy stays the single point of truth. Raises
+    :class:`AlertValidationError` on malformed/schema-invalid alerts.
     """
-    try:
-        root = etree.fromstring(raw_body)
-    except etree.XMLSyntaxError as exc:
-        log.warning("system_alert: malformed XML, discarding: %s", exc)
-        return
-
-    if not schema.validate(root):
-        log.warning("system_alert: schema validation failed, discarding: %s", schema.error_log)
-        return
-
-    system = root.findtext("system") or ""
-    message = root.findtext("message") or ""
-    timestamp = root.findtext("timestamp") or ""
+    system, message, timestamp = parse_alert(raw_body, schema)
+    safe_system = escape(system)
+    safe_message = escape(message)
+    safe_timestamp = escape(timestamp)
 
     subject = f"[HEARTBEAT_CRITICAL] {system} — {timestamp}"
 
     html_body = (
         '<!doctype html>'
         '<html><body style="font-family:Arial,sans-serif">'
-        f'<h2 style="color:#d32f2f;margin:0 0 8px">System DOWN: {system}</h2>'
-        f'<p><strong>Alert issued (UTC):</strong> {timestamp}</p>'
-        f'<p>{message}</p>'
+        f'<h2 style="color:#d32f2f;margin:0 0 8px">System DOWN: {safe_system}</h2>'
+        f'<p><strong>Alert issued (UTC):</strong> {safe_timestamp}</p>'
+        f'<p>{safe_message}</p>'
         '<p>This is an automated alert from the monitoring platform.</p>'
         '</body></html>'
     )

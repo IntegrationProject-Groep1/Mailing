@@ -4,7 +4,7 @@ Single chokepoint for envelope-format compliance. Every consumer feeds the
 raw AMQP body through :func:`parse_and_validate` with the per-flow XSD it
 expects. Failures are raised as :class:`MalformedXMLError` or
 :class:`SchemaValidationError`; the consumer translates either one into a
-``system_error`` publish + ack (see ``publishers/system_error.py``).
+contract ``log`` publish + ack (see ``publishers/logs.py``).
 """
 
 from dataclasses import dataclass

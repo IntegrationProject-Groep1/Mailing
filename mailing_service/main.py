@@ -8,27 +8,20 @@ import pika
 from lxml import etree
 
 import envelope
+import sendgrid_failures
+import templates
 from consumers import send_mailing as send_mailing_consumer
 from consumers import system_alert as system_alert_consumer
-from failure_tracker import SlidingWindowFailureTracker
-from publishers import system_error
+from publishers import logs
 from sendgrid_client import SendGridError
 
-ALERT_QUEUE = "to_mailing"
+ALERT_QUEUE = "monitoring.alerts"
 CRM_SEND_MAILING_QUEUE = "crm.to.mailing"
 FACTURATIE_SEND_MAILING_QUEUE = "facturatie.to.mailing"
-MAILING_ERROR_QUEUE = system_error.ERROR_QUEUE   # "mailing.errors"
+LOG_QUEUE = logs.LOG_QUEUE
 
 CONNECT_RETRIES = 10
 CONNECT_DELAY_SECONDS = 2
-NACK_BACKOFF_SECONDS = 2
-
-# Escalation thresholds for SendGrid outages. A single 5xx is a normal
-# transient failure (handled by nack-requeue); 3+ in 60s is a platform
-# problem that Operations needs to know about.
-_SENDGRID_FAILURES = SlidingWindowFailureTracker(
-    window_seconds=60.0, threshold=3, cooldown_seconds=300.0,
-)
 
 log = logging.getLogger("mailing_service")
 
@@ -78,13 +71,46 @@ def _load_schema(name: str) -> etree.XMLSchema:
     return etree.XMLSchema(etree.parse(path))
 
 
+def validate_startup_config() -> dict[str, etree.XMLSchema]:
+    """Validate required environment and schemas before consuming messages."""
+    required = [
+        "RABBITMQ_HOST",
+        "RABBITMQ_USER",
+        "RABBITMQ_PASS",
+        "SENDGRID_API_KEY",
+        "FROM_EMAIL",
+        "ADMIN_EMAILS",
+    ]
+    required.extend(f"SENDGRID_TEMPLATE_{mail_type.name}" for mail_type in templates.MailType)
+
+    missing = [name for name in required if not os.environ.get(name, "").strip()]
+    if missing:
+        raise RuntimeError(f"Missing required environment variable(s): {', '.join(missing)}")
+
+    try:
+        port = int(os.environ.get("RABBITMQ_PORT", "5672"))
+    except ValueError as exc:
+        raise RuntimeError("RABBITMQ_PORT must be an integer") from exc
+    if port <= 0:
+        raise RuntimeError("RABBITMQ_PORT must be positive")
+
+    admin_recipients = [e.strip() for e in os.environ["ADMIN_EMAILS"].split(",") if e.strip()]
+    if not admin_recipients:
+        raise RuntimeError("ADMIN_EMAILS must contain at least one email address")
+
+    return {
+        name: _load_schema(name)
+        for name in ("system_alert", "send_mailing", "mailing_status", "log")
+    }
+
+
 def _build_callback(schema: etree.XMLSchema, handler, *, pass_channel: bool):
     """Build a per-queue callback that validates + dispatches standard envelopes.
 
     ``handler`` takes either ``(env)`` or ``(env, channel)`` — controlled by
-    ``pass_channel``. On envelope-format failures we publish a ``system_error``
-    and ack; on transient SendGrid failures we nack-requeue; on permanent
-    failures we ack (the handler already published the appropriate response).
+    ``pass_channel``. On envelope-format failures we publish a contract log and
+    ack. Transient SendGrid failures are logged and acked so outages do not
+    create an infinite requeue loop.
     """
     def on_message(ch, method, _properties, body):
         delivery_tag = method.delivery_tag
@@ -92,21 +118,23 @@ def _build_callback(schema: etree.XMLSchema, handler, *, pass_channel: bool):
             env = envelope.parse_and_validate(body, schema)
         except envelope.MalformedXMLError as exc:
             log.warning("Malformed XML on %s, flagging: %s", method.routing_key, exc)
-            system_error.publish(
+            logs.publish_system_error(
                 ch,
-                error_code=system_error.INVALID_XML_FORMAT,
+                error_code=logs.INVALID_XML_FORMAT,
                 error_description=f"malformed XML on {method.routing_key}: {exc}",
                 related_message_id=None,
+                action="xml_validation",
             )
             ch.basic_ack(delivery_tag)
             return
         except envelope.SchemaValidationError as exc:
             log.warning("XSD validation failed on %s, flagging: %s", method.routing_key, exc)
-            system_error.publish(
+            logs.publish_system_error(
                 ch,
-                error_code=system_error.INVALID_XML_FORMAT,
+                error_code=logs.INVALID_XML_FORMAT,
                 error_description=f"schema validation failed on {method.routing_key}: {exc}",
                 related_message_id=None,
+                action="xml_validation",
             )
             ch.basic_ack(delivery_tag)
             return
@@ -117,23 +145,17 @@ def _build_callback(schema: etree.XMLSchema, handler, *, pass_channel: bool):
             else:
                 handler(env)
             ch.basic_ack(delivery_tag)
-        except SendGridError as exc:
-            log.error(
-                "Transient send failure, requeueing: %s", exc,
-                extra={"action": "sendgrid_dispatch"},
-            )
-            if _SENDGRID_FAILURES.record_failure():
-                system_error.publish(
-                    ch,
-                    error_code=system_error.SENDGRID_UNAVAILABLE,
-                    error_description=(
-                        "SendGrid 5xx/network failures crossed 3-in-60s "
-                        f"threshold (latest: {exc})"
-                    ),
-                    related_message_id=env.message_id if 'env' in locals() else None,
-                )
+        except send_mailing_consumer.RetryableStatusPublishError as exc:
+            log.error("Status publish failed after processing; requeueing: %s", exc)
             ch.basic_nack(delivery_tag, requeue=True)
-            time.sleep(NACK_BACKOFF_SECONDS)
+        except SendGridError as exc:
+            log.error("Transient send failure, logging and discarding: %s", exc)
+            sendgrid_failures.publish_failure_log(
+                ch,
+                error_description=f"SendGrid dispatch failed: {exc}",
+                related_message_id=env.message_id,
+            )
+            ch.basic_ack(delivery_tag)
         except RuntimeError as exc:
             log.error("Permanent send failure, discarding: %s", exc)
             ch.basic_ack(delivery_tag)
@@ -149,31 +171,30 @@ def _build_alert_callback(schema: etree.XMLSchema):
 
     The Monitoring→Mailing alert flow uses a flat ``<alert>`` root rather
     than the standard ``<message>`` envelope (sanctioned exception, §4).
-    Validation and parsing are delegated to the consumer so we stay simple
-    here: ack unconditionally (a malformed alert must not block the queue),
-    nack-requeue only on transient SendGrid errors.
+    Invalid alerts are logged and acked. SendGrid failures are also logged and
+    acked to avoid an infinite requeue loop during provider outages.
     """
     def on_message(ch, method, _properties, body):
         delivery_tag = method.delivery_tag
         try:
             system_alert_consumer.handle(body, schema)
             ch.basic_ack(delivery_tag)
-        except SendGridError as exc:
-            log.error(
-                "Transient send failure on alert, requeueing: %s", exc,
-                extra={"action": "consume_system_alert"},
+        except system_alert_consumer.AlertValidationError as exc:
+            log.warning("Invalid system_alert on %s, flagging: %s", method.routing_key, exc)
+            logs.publish_system_error(
+                ch,
+                error_code=logs.INVALID_XML_FORMAT,
+                error_description=f"invalid system_alert on {method.routing_key}: {exc}",
+                action="xml_validation",
             )
-            if _SENDGRID_FAILURES.record_failure():
-                system_error.publish(
-                    ch,
-                    error_code=system_error.SENDGRID_UNAVAILABLE,
-                    error_description=(
-                        "SendGrid 5xx/network failures crossed 3-in-60s "
-                        f"threshold (latest: {exc})"
-                    ),
-                )
-            ch.basic_nack(delivery_tag, requeue=True)
-            time.sleep(NACK_BACKOFF_SECONDS)
+            ch.basic_ack(delivery_tag)
+        except SendGridError as exc:
+            log.error("Transient send failure on alert, logging and discarding: %s", exc)
+            sendgrid_failures.publish_failure_log(
+                ch,
+                error_description=f"SendGrid alert dispatch failed: {exc}",
+            )
+            ch.basic_ack(delivery_tag)
         except Exception:
             log.exception("Unexpected error handling alert; discarding")
             ch.basic_ack(delivery_tag)
@@ -198,15 +219,15 @@ def _install_signal_handlers(connection: pika.BlockingConnection, channel) -> No
 
 
 def run() -> None:
-    # Load all per-flow schemas once at startup. The mailing_status and
-    # system_error publishers lazy-load their own outbound schemas.
-    system_alert_schema = _load_schema("system_alert")
-    send_mailing_schema = _load_schema("send_mailing")
+    # Validate config and load all runtime schemas before taking messages.
+    schemas = validate_startup_config()
+    system_alert_schema = schemas["system_alert"]
+    send_mailing_schema = schemas["send_mailing"]
 
     # Tracks whether we just recovered from an unplanned disconnect.
     # First pass through the loop is a clean startup (False). Set True
     # by the AMQPConnectionError handler so the next successful connect
-    # publishes a system_error.
+    # publishes a contract log.
     recovering_from_outage = False
     outage_started_at: float | None = None
 
@@ -224,13 +245,12 @@ def run() -> None:
             channel.queue_declare(queue=FACTURATIE_SEND_MAILING_QUEUE, durable=True)
             # Queues we publish to. crm.incoming is owned by CRM but we declare
             # it here to ensure it exists before the first publish.
-            channel.queue_declare(queue=MAILING_ERROR_QUEUE, durable=True)
+            channel.queue_declare(queue=LOG_QUEUE, durable=True)
             channel.queue_declare(queue="crm.incoming", durable=True)
 
             if recovering_from_outage:
                 # We came back online after a broker outage. Surface it to
-                # Monitoring before resuming consumption — this is the
-                # FATAL-equivalent the plan calls for in §2.4.
+                # Monitoring before resuming consumption.
                 duration_s = (
                     time.monotonic() - outage_started_at
                     if outage_started_at is not None else 0.0
@@ -239,9 +259,9 @@ def run() -> None:
                     "Recovered from broker outage after %.1fs", duration_s,
                     extra={"action": "broker_connect"},
                 )
-                system_error.publish(
+                logs.publish_system_error(
                     channel,
-                    error_code=system_error.BROKER_OUTAGE,
+                    error_code=logs.BROKER_OUTAGE,
                     error_description=(
                         f"mailing service recovered from broker outage "
                         f"after {duration_s:.1f}s"
@@ -287,7 +307,7 @@ def run() -> None:
             )
             if not recovering_from_outage:
                 # First disconnect of this outage; start the clock so the
-                # post-recovery system_error can report duration.
+                # post-recovery log can report duration.
                 outage_started_at = time.monotonic()
             recovering_from_outage = True
             try:
