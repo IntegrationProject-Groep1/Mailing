@@ -10,22 +10,26 @@ Python service that consumes v2.0 platform-contract messages from the shared Rab
 | 2 | CRM | `crm.to.mailing` | `crm.incoming` (`mailing_status`) | Transactional email via SendGrid Dynamic Template (contract §12.1) |
 | 3 | Facturatie | `facturatie.to.mailing` | `crm.incoming` (`mailing_status`) | Same template flow as CRM, different source (contract §13.1) |
 
-Every inbound message that fails XML parsing or schema validation, plus a few permanent application-level failures, also produces a `system_error` (contract §2.6) on `mailing.errors` so Monitoring sees contract drift in real time. Two additional escalations fire automatically:
+Every inbound message that fails XML parsing or schema validation, plus a few permanent application-level failures, also produces a contract `log` message on `logs` so Monitoring sees contract drift in real time. Two additional escalations fire automatically:
 
-- **`sendgrid_unavailable`** when 3+ SendGrid 5xx/network failures land within 60 s. Suppressed for a 5-minute cooldown afterwards so a sustained outage doesn't spam the queue.
-- **`broker_outage`** the first time we successfully reconnect after losing the broker connection. Includes the outage duration in the description.
+- **`sendgrid_unavailable`** for SendGrid 5xx/network failures. Every failed send is logged and converted to failed status where possible; 3+ failures within 60 s also emit a rate-limited outage-level log.
+- **`broker_outage`** the first time we successfully reconnect after losing the broker connection. Includes the outage duration in the log message.
+
+SendGrid outages are not nack/requeued. This avoids an infinite requeue loop while the provider is down. The service keeps in-memory idempotency state for processed `send_mailing` message IDs and pending `mailing_status` publishes, but that state is lost on process restart.
 
 Heartbeats are out of scope for this repo (Sidecar Principle, contract §3.1) — the platform's deployment workflow attaches the heartbeat sidecar; nothing in this codebase or its `docker-compose.yml` references it.
 
-## Message shape (v2.0 envelope)
+## Message shape
+
+`send_mailing`, `mailing_status`, and `log` use the v2.0 envelope:
 
 ```xml
 <message>
   <header>
     <message_id>...</message_id>
     <timestamp>2026-04-24T10:35:12Z</timestamp>
-    <source>monitoring|crm|facturatie</source>
-    <type>system_alert|send_mailing</type>
+    <source>crm|facturatie|mailing</source>
+    <type>send_mailing|mailing_status|log</type>
     <version>2.0</version>
     <correlation_id>...</correlation_id>   <!-- mandatory for send_mailing -->
   </header>
@@ -35,7 +39,9 @@ Heartbeats are out of scope for this repo (Sidecar Principle, contract §3.1) �
 </message>
 ```
 
-Authoritative schemas live in [mailing_service/schemas/](mailing_service/schemas/) and are validated on every inbound message and every outbound `mailing_status` / `system_error`.
+Monitoring alerts are the contract's sanctioned exception: they use a flat `<alert>` root and are consumed from `monitoring.alerts`.
+
+Authoritative runtime schemas live in [mailing_service/schemas/](mailing_service/schemas/) and are validated on every inbound message and every outbound `mailing_status` / `log`. The root-level `xsd/` copies were removed to avoid duplicate schema sources.
 
 ## SendGrid templates
 
@@ -62,7 +68,7 @@ mailing/
 │   ├── main.py                 connection lifecycle + 3× basic_consume
 │   ├── envelope.py             v2.0 envelope parse + validate helper
 │   ├── consumers/              per-flow handlers (system_alert, send_mailing)
-│   ├── publishers/             outbound publishers (mailing_status, system_error)
+│   ├── publishers/             outbound publishers (mailing_status, logs)
 │   ├── sendgrid_client.py      SendGrid wrapper (plain + template variants)
 │   ├── templates.py            mail_type → SendGrid template_id mapping
 │   └── schemas/                v2.0 XSDs
@@ -74,7 +80,7 @@ mailing/
 
 ## Running locally
 
-1. `cp .env.example .env` and fill in a real `SENDGRID_API_KEY`, a SendGrid-verified `FROM_EMAIL`, `ADMIN_EMAILS`, and the five `SENDGRID_TEMPLATE_*` IDs.
+1. `cp .env.example .env` and fill in a real `SENDGRID_API_KEY`, a SendGrid-verified `FROM_EMAIL`, `ADMIN_EMAILS`, and the five `SENDGRID_TEMPLATE_*` IDs. The service validates these variables and all runtime schemas before it starts consuming.
 2. Start the test broker:
    ```
    cd test && docker compose up -d
@@ -87,10 +93,15 @@ mailing/
    ```
    cd test
    pip install -r requirements.txt
-   python test_messages.py --scenario all --listen-mailing-status --listen-mailing-errors
+   python test_messages.py --scenario all --listen-mailing-status --listen-logs
    ```
 
 The RabbitMQ management UI is at http://localhost:15672 (user `mailing`, pass `mailing`).
+
+Run unit checks locally with:
+```
+SCHEMAS_DIR=$PWD/mailing_service/schemas python -m unittest discover -s test -p "test_*.py"
+```
 
 ### Available scenarios
 
