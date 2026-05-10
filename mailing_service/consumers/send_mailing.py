@@ -19,6 +19,8 @@ import json
 import logging
 import os
 
+from cachetools import TTLCache
+
 import sendgrid_client
 import sendgrid_failures
 import templates
@@ -30,8 +32,9 @@ log = logging.getLogger(__name__)
 # 25 MB, leaving 5 MB headroom under SendGrid's 30 MB total-message cap.
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
-_COMPLETED_MESSAGE_IDS: set[str] = set()
-_PENDING_STATUSES: dict[str, dict] = {}
+# Track processed and pending messages with a 24-hour TTL to prevent memory leaks.
+_COMPLETED_MESSAGE_IDS: TTLCache[str, bool] = TTLCache(maxsize=10000, ttl=86400)
+_PENDING_STATUSES: TTLCache[str, dict] = TTLCache(maxsize=10000, ttl=86400)
 
 
 class _OversizedAttachmentError(Exception):
@@ -129,7 +132,7 @@ def _publish_final_status(channel, *, env: Envelope, **status_payload) -> None:
 
     if env.message_id:
         _PENDING_STATUSES.pop(env.message_id, None)
-        _COMPLETED_MESSAGE_IDS.add(env.message_id)
+        _COMPLETED_MESSAGE_IDS[env.message_id] = True
 
 
 def _publish_pending_status(channel, env: Envelope) -> bool:
