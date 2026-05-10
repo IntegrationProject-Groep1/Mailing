@@ -33,8 +33,8 @@ log = logging.getLogger(__name__)
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 # Track processed and pending messages with a 24-hour TTL to prevent memory leaks.
-_COMPLETED_MESSAGE_IDS: TTLCache[str, bool] = TTLCache(maxsize=10000, ttl=86400)
-_PENDING_STATUSES: TTLCache[str, dict] = TTLCache(maxsize=10000, ttl=86400)
+_COMPLETED_MESSAGE_IDS: TTLCache[str, bool] = TTLCache(maxsize=100000, ttl=86400)
+_PENDING_STATUSES: TTLCache[str, dict] = TTLCache(maxsize=100000, ttl=86400)
 
 
 class _OversizedAttachmentError(Exception):
