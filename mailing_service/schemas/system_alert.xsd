@@ -2,7 +2,7 @@
 <!--
   Contract section 4: Monitoring → Mailing alert (flat <alert> root).
   Sanctioned exception to Rule 1: this internal Monitoring↔Mailing message
-  uses a flat root instead of the standard <message> envelope. Queue: to_mailing.
+  uses a flat root instead of the standard <message> envelope. Queue: monitoring.alerts.
 -->
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
 

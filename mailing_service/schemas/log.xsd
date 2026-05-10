@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Contract section 9.1: Mailing → CRM mailing_status response.
-  We validate our OUTBOUND messages against this XSD before publishing so
-  bugs surface here, not at the consumer in CRM.
--->
+<!-- Contract section 3.5: application logs to Monitoring. Queue: logs. -->
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
 
   <xs:simpleType name="UUIDType">
@@ -22,12 +18,19 @@
               <xs:element name="timestamp"  type="xs:dateTime"/>
               <xs:element name="source">
                 <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="crm"/>
+                  <xs:enumeration value="kassa"/>
+                  <xs:enumeration value="facturatie"/>
+                  <xs:enumeration value="frontend"/>
+                  <xs:enumeration value="planning"/>
                   <xs:enumeration value="mailing"/>
+                  <xs:enumeration value="identity-service"/>
+                  <xs:enumeration value="iot_gateway"/>
                 </xs:restriction></xs:simpleType>
               </xs:element>
               <xs:element name="type">
                 <xs:simpleType><xs:restriction base="xs:string">
-                  <xs:enumeration value="mailing_status"/>
+                  <xs:enumeration value="log"/>
                 </xs:restriction></xs:simpleType>
               </xs:element>
               <xs:element name="version">
@@ -35,36 +38,37 @@
                   <xs:enumeration value="2.0"/>
                 </xs:restriction></xs:simpleType>
               </xs:element>
-              <!-- correlation_id is propagated from the original send_mailing
-                   so CRM can match the response to its request. -->
-              <xs:element name="correlation_id" type="UUIDType" minOccurs="0"/>
             </xs:sequence>
           </xs:complexType>
         </xs:element>
-
         <xs:element name="body">
           <xs:complexType>
             <xs:sequence>
-              <xs:element name="campaign_id" type="xs:string"/>
-              <xs:element name="subject"     type="xs:string"/>
-              <xs:element name="sent"        type="xs:integer"/>
-              <xs:element name="delivered"   type="xs:integer"/>
-              <xs:element name="bounced"     type="xs:integer"/>
-              <xs:element name="bounced_emails" minOccurs="0">
-                <xs:complexType>
-                  <xs:sequence>
-                    <xs:element name="email" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
-                  </xs:sequence>
-                </xs:complexType>
-              </xs:element>
-              <xs:element name="opened"      type="xs:integer"/>
-              <xs:element name="status">
+              <xs:element name="level">
                 <xs:simpleType><xs:restriction base="xs:string">
-                  <xs:enumeration value="completed"/>
-                  <xs:enumeration value="partial_failure"/>
-                  <xs:enumeration value="failed"/>
+                  <xs:enumeration value="info"/>
+                  <xs:enumeration value="warning"/>
+                  <xs:enumeration value="error"/>
                 </xs:restriction></xs:simpleType>
               </xs:element>
+              <xs:element name="action">
+                <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="registration"/>
+                  <xs:enumeration value="user"/>
+                  <xs:enumeration value="payment"/>
+                  <xs:enumeration value="invoice"/>
+                  <xs:enumeration value="session"/>
+                  <xs:enumeration value="calendar"/>
+                  <xs:enumeration value="email"/>
+                  <xs:enumeration value="wallet"/>
+                  <xs:enumeration value="refund"/>
+                  <xs:enumeration value="identity"/>
+                  <xs:enumeration value="xml_validation"/>
+                  <xs:enumeration value="system_error"/>
+                  <xs:enumeration value="badge"/>
+                </xs:restriction></xs:simpleType>
+              </xs:element>
+              <xs:element name="message" type="xs:string"/>
             </xs:sequence>
           </xs:complexType>
         </xs:element>

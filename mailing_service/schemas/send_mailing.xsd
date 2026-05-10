@@ -5,6 +5,12 @@
 -->
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
 
+  <xs:simpleType name="UUIDType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
   <xs:complexType name="ContactType">
     <xs:sequence>
       <xs:element name="first_name" type="xs:string"/>
@@ -15,7 +21,7 @@
   <xs:complexType name="RecipientType">
     <xs:sequence>
       <xs:element name="email"   type="xs:string"/>
-      <xs:element name="identity_uuid" type="xs:string"/>
+      <xs:element name="identity_uuid" type="UUIDType"/>
       <xs:element name="contact" type="ContactType"/>
     </xs:sequence>
   </xs:complexType>
@@ -34,7 +40,7 @@
         <xs:element name="header">
           <xs:complexType>
             <xs:sequence>
-              <xs:element name="message_id" type="xs:string"/>
+              <xs:element name="message_id" type="UUIDType"/>
               <xs:element name="timestamp"  type="xs:dateTime"/>
               <xs:element name="source">
                 <xs:simpleType><xs:restriction base="xs:string">
@@ -55,7 +61,7 @@
               <!-- correlation_id is mandatory for send_mailing per §12.1: it is
                    echoed back in the mailing_status response so the sender can
                    match the result to the original request. -->
-              <xs:element name="correlation_id" type="xs:string"/>
+              <xs:element name="correlation_id" type="UUIDType"/>
             </xs:sequence>
           </xs:complexType>
         </xs:element>

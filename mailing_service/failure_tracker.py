@@ -1,14 +1,14 @@
-"""Sliding-window failure tracker used for system_error escalation.
+"""Sliding-window failure tracker used for outage log escalation.
 
 A single failure is just a normal log line; many failures in a short
 window indicate a platform-level problem (e.g. SendGrid API auth gone
 bad, broker churning) that another team needs to know about. This
 module tracks the rate, fires a callback when a threshold trips, and
-holds a cooldown afterwards so we don't spam ``mailing.errors``.
+holds a cooldown afterwards so we don't spam Monitoring's ``logs`` queue.
 
 Used in two places:
 
-* SendGrid 5xx ramp — 3+ failures in 60 s → ``sendgrid_unavailable``
+* SendGrid 5xx ramp — 3+ failures in 60 s → ``sendgrid_unavailable`` log
 * Broker reconnect after sustained outage — counted via this same
   primitive but with different params (see main.py)
 
@@ -46,7 +46,7 @@ class SlidingWindowFailureTracker:
     def record_failure(self, *, now: float | None = None) -> bool:
         """Record one failure; return True iff the threshold just tripped.
 
-        The caller fires the system_error / FATAL log on True. Returns
+        The caller fires the outage log on True. Returns
         False during the cooldown that follows a previous trip even if
         failures keep arriving.
         """

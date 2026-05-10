@@ -66,11 +66,11 @@ def _build_element(
     etree.SubElement(body, "sent").text = str(sent)
     etree.SubElement(body, "delivered").text = str(delivered)
     etree.SubElement(body, "bounced").text = str(bounced)
-    etree.SubElement(body, "opened").text = str(opened)
     if bounced_emails:
         be_el = etree.SubElement(body, "bounced_emails")
         for email in bounced_emails:
             etree.SubElement(be_el, "email").text = email
+    etree.SubElement(body, "opened").text = str(opened)
     etree.SubElement(body, "status").text = status
 
     return root

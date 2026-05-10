@@ -2,7 +2,7 @@
 <!--
   Well-formed XML, but the envelope has no <header>. Verifies that
   parse_and_validate raises SchemaValidationError and the consumer
-  emits a system_error with error_code=invalid_xml_format.
+  emits a log message with error_code=invalid_xml_format.
 -->
 <message>
   <body>

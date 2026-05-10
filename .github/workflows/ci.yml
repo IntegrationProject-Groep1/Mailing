@@ -45,9 +45,9 @@ jobs:
           python - <<'PY'
           import sys
           sys.path.insert(0, "mailing_service")
-          import main, envelope, templates, sendgrid_client, failure_tracker
+          import main, envelope, templates, sendgrid_client, failure_tracker, sendgrid_failures
           from consumers import system_alert, send_mailing
-          from publishers import system_error, mailing_status
+          from publishers import logs, mailing_status
           print("All modules import cleanly.")
           PY
 
@@ -103,3 +103,8 @@ jobs:
                   print(f"  ok: {name} valid={valid}")
           sys.exit(0 if ok else 1)
           PY
+
+      - name: Run unit tests
+        env:
+          SCHEMAS_DIR: ${{ github.workspace }}/mailing_service/schemas
+        run: python -m unittest discover -s test -p "test_*.py"
