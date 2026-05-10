@@ -8,7 +8,7 @@ Examples:
     python test_messages.py --scenario system_alert_offline
     python test_messages.py --scenario crm_send_mailing
     python test_messages.py --scenario all
-    python test_messages.py --scenario all --listen-mailing-status --listen-mailing-errors --listen-seconds 8
+    python test_messages.py --scenario all --listen-mailing-status --listen-logs --listen-seconds 8
 """
 
 import argparse
@@ -26,7 +26,7 @@ QUEUE_MONITORING_ALERTS = "monitoring.alerts"
 QUEUE_CRM_SEND_MAILING = "crm.to.mailing"
 QUEUE_FACTURATIE_SEND_MAILING = "facturatie.to.mailing"
 QUEUE_CRM_INCOMING = "crm.incoming"
-QUEUE_MAILING_ERRORS = "mailing.errors"
+QUEUE_LOGS = "logs"
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
@@ -56,7 +56,7 @@ def _build_oversized_send_mailing() -> bytes:
     """Build a send_mailing with a >25 MB base64 attachment.
 
     Verifies the consumer's MAX_ATTACHMENT_BYTES guard (plan §1.5):
-    the consumer should ack, publish a system_error, and publish a
+    the consumer should ack, publish an error log, and publish a
     mailing_status with status=failed.
     """
     # 26 MiB of base64 'A' characters → decodes to ~19.5 MiB but the
@@ -97,10 +97,9 @@ def _build_unknown_mail_type() -> bytes:
     """A send_mailing with mail_type not in our enum.
 
     The XSD will REJECT this before the consumer sees it (the mail_type
-    enum is enforced by send_mailing.xsd) → behaviour is "system_error
-    invalid_xml_format on schema validation" rather than "system_error
-    unknown_message_type". We test the same code path either way; what
-    matters is that no email is sent and exactly one system_error fires.
+    enum is enforced by send_mailing.xsd) → behaviour is a logs message
+    with invalid_xml_format on schema validation. We test the same code
+    path either way; what matters is that no email is sent and a log fires.
     """
     raw = (FIXTURES_DIR / "crm_send_mailing.xml").read_text()
     raw = raw.replace(
@@ -157,7 +156,7 @@ def _declare_queues(channel) -> None:
         QUEUE_CRM_SEND_MAILING,
         QUEUE_FACTURATIE_SEND_MAILING,
         QUEUE_CRM_INCOMING,
-        QUEUE_MAILING_ERRORS,
+        QUEUE_LOGS,
     ):
         channel.queue_declare(queue=q, durable=True)
 
@@ -195,8 +194,8 @@ def main() -> None:
     parser.add_argument("--count", type=int, default=1, help="Repeat the chosen scenario(s) N times")
     parser.add_argument("--listen-mailing-status", action="store_true",
                         help="After publishing, drain crm.incoming for --listen-seconds")
-    parser.add_argument("--listen-mailing-errors", action="store_true",
-                        help="After publishing, drain mailing.errors for --listen-seconds")
+    parser.add_argument("--listen-logs", action="store_true",
+                        help="After publishing, drain logs for --listen-seconds")
     parser.add_argument("--listen-seconds", type=float, default=5.0,
                         help="How long to drain response queues (default: 5)")
     args = parser.parse_args()
@@ -213,8 +212,8 @@ def main() -> None:
 
         if args.listen_mailing_status:
             _drain(channel, QUEUE_CRM_INCOMING, "mailing_status", args.listen_seconds)
-        if args.listen_mailing_errors:
-            _drain(channel, QUEUE_MAILING_ERRORS, "mailing_errors", args.listen_seconds)
+        if args.listen_logs:
+            _drain(channel, QUEUE_LOGS, "logs", args.listen_seconds)
     finally:
         connection.close()
     log.info("Done")
