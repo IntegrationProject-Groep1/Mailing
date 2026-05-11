@@ -283,3 +283,9 @@ def handle(env: Envelope, channel) -> None:
         opened=0,
         status="completed",
     )
+    logs.publish(
+        channel,
+        level="info",
+        action="email",
+        message=f"Successfully sent email campaign={campaign_id} to {sent} recipients",
+    )

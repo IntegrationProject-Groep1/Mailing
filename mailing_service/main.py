@@ -177,7 +177,7 @@ def _build_alert_callback(schema: etree.XMLSchema):
     def on_message(ch, method, _properties, body):
         delivery_tag = method.delivery_tag
         try:
-            system_alert_consumer.handle(body, schema)
+            system_alert_consumer.handle(body, schema, channel=ch)
             ch.basic_ack(delivery_tag)
         except system_alert_consumer.AlertValidationError as exc:
             log.warning("Invalid system_alert on %s, flagging: %s", method.routing_key, exc)
