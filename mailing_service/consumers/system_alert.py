@@ -13,6 +13,8 @@ from html import escape
 import sendgrid_client
 from lxml import etree
 
+from publishers import logs
+
 log = logging.getLogger(__name__)
 
 
@@ -37,7 +39,7 @@ def parse_alert(raw_body: bytes, schema: etree.XMLSchema) -> tuple[str, str, str
     )
 
 
-def handle(raw_body: bytes, schema: etree.XMLSchema) -> None:
+def handle(raw_body: bytes, schema: etree.XMLSchema, channel) -> None:
     """Validate and send an alert email for one flat ``<alert>`` message.
 
     Raises whatever ``sendgrid_client`` raises so the caller's nack/ack
@@ -63,3 +65,11 @@ def handle(raw_body: bytes, schema: etree.XMLSchema) -> None:
 
     log.info("Dispatching alert email: system=%s", system)
     sendgrid_client.send_email(subject, html_body)
+
+    if channel:
+        logs.publish(
+            channel,
+            level="info",
+            action="email",
+            message=f"Successfully sent system alert email for system={system}",
+        )

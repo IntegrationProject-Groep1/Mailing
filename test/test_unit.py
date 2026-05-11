@@ -171,6 +171,23 @@ class MailingServiceUnitTests(unittest.TestCase):
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html_body)
         self.assertNotIn("<script>alert(1)</script>", html_body)
 
+    def test_successful_system_alert_publishes_log(self):
+        raw = b"""<?xml version="1.0" encoding="UTF-8"?>
+<alert>
+  <type>HEARTBEAT_CRITICAL</type>
+  <system>facturatie</system>
+  <message>Service is down</message>
+  <timestamp>2026-05-15T10:00:00Z</timestamp>
+</alert>"""
+        channel = FakeChannel()
+        with patch("sendgrid_client.send_email"):
+            system_alert.handle(raw, _schema("system_alert"), channel=channel)
+
+        log_root = _body_for(channel.published, "logs")
+        self.assertEqual(log_root.findtext("body/level"), "info")
+        self.assertEqual(log_root.findtext("body/action"), "email")
+        self.assertIn("Successfully sent system alert email for system=facturatie", log_root.findtext("body/message"))
+
     def test_sendgrid_failure_logs_and_publishes_failed_status(self):
         env = _send_mailing_env()
         channel = FakeChannel()
@@ -188,6 +205,23 @@ class MailingServiceUnitTests(unittest.TestCase):
         self.assertEqual(status.findtext("body/status"), "failed")
         self.assertEqual(log_root.findtext("body/action"), "email")
         self.assertIn("sendgrid_unavailable", log_root.findtext("body/message"))
+
+    def test_successful_send_mailing_publishes_log(self):
+        env = _send_mailing_env()
+        channel = FakeChannel()
+
+        with patch.dict(os.environ, {"SCHEMAS_DIR": str(SCHEMAS_DIR), "FROM_EMAIL": "from@example.test"}, clear=True):
+            with patch("templates.resolve_template_id", return_value="d-template"):
+                with patch(
+                    "sendgrid_client.send_template_email",
+                    return_value=sendgrid_client.SendResult(accepted=["jan@example.test"]),
+                ):
+                    send_mailing.handle(env, channel)
+
+        log_root = _body_for(channel.published, "logs")
+        self.assertEqual(log_root.findtext("body/level"), "info")
+        self.assertEqual(log_root.findtext("body/action"), "email")
+        self.assertIn("Successfully sent email campaign=campaign-1 to 1 recipients", log_root.findtext("body/message"))
 
     def test_duplicate_completed_send_mailing_does_not_resend(self):
         env = _send_mailing_env()
