@@ -39,7 +39,7 @@ def parse_alert(raw_body: bytes, schema: etree.XMLSchema) -> tuple[str, str, str
     )
 
 
-def handle(raw_body: bytes, schema: etree.XMLSchema, channel=None) -> None:
+def handle(raw_body: bytes, schema: etree.XMLSchema, channel) -> None:
     """Validate and send an alert email for one flat ``<alert>`` message.
 
     Raises whatever ``sendgrid_client`` raises so the caller's nack/ack
