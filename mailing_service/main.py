@@ -246,7 +246,11 @@ def run() -> None:
             # Queues we publish to. crm.incoming is owned by CRM but we declare
             # it here to ensure it exists before the first publish.
             channel.queue_declare(queue=LOG_QUEUE, durable=True)
-            channel.queue_declare(queue="crm.incoming", durable=True)
+            channel.queue_declare(
+                queue="crm.incoming",
+                durable=True,
+                arguments={"x-dead-letter-exchange": "crm.dlx"},
+            )
 
             if recovering_from_outage:
                 # We came back online after a broker outage. Surface it to

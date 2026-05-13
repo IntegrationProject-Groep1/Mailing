@@ -158,7 +158,10 @@ def _declare_queues(channel) -> None:
         QUEUE_CRM_INCOMING,
         QUEUE_LOGS,
     ):
-        channel.queue_declare(queue=q, durable=True)
+        args = None
+        if q == QUEUE_CRM_INCOMING:
+            args = {"x-dead-letter-exchange": "crm.dlx"}
+        channel.queue_declare(queue=q, durable=True, arguments=args)
 
 
 def _publish(channel, queue: str, body: bytes, label: str) -> None:
