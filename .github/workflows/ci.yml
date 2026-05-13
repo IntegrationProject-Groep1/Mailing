@@ -11,7 +11,7 @@
 #   * SendGrid behaviour
 #   * RabbitMQ broker availability
 
-name: ci
+name: CI Pipeline
 
 on:
   pull_request:
