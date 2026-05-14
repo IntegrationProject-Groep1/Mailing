@@ -26,6 +26,10 @@ class MailType(StrEnum):
     INVOICE_READY = "invoice_ready"
     SESSION_UPDATE = "session_update"
     GENERAL_ANNOUNCEMENT = "general_announcement"
+    # Monitoring → Mailing daily platform report (queue monitoring.reports,
+    # XSD monitoring_report.xsd). Distinct wire shape from CRM/Facturatie's
+    # send_mailing.xsd; the enum value is shared.
+    DAILY_REPORT = "daily_report"
 
 
 class UnknownMailTypeError(Exception):

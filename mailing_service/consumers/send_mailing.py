@@ -33,11 +33,11 @@ log = logging.getLogger(__name__)
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 # Track processed and pending messages with a 24-hour TTL to prevent memory leaks.
-_COMPLETED_MESSAGE_IDS: TTLCache[str, bool] = TTLCache(maxsize=100000, ttl=86400)
+COMPLETED_MESSAGE_IDS: TTLCache[str, bool] = TTLCache(maxsize=100000, ttl=86400)
 _PENDING_STATUSES: TTLCache[str, dict] = TTLCache(maxsize=100000, ttl=86400)
 
 
-class _OversizedAttachmentError(Exception):
+class OversizedAttachmentError(Exception):
     pass
 
 
@@ -47,11 +47,11 @@ class RetryableStatusPublishError(Exception):
 
 def reset_idempotency_state() -> None:
     """Clear in-memory idempotency state. Intended for tests."""
-    _COMPLETED_MESSAGE_IDS.clear()
+    COMPLETED_MESSAGE_IDS.clear()
     _PENDING_STATUSES.clear()
 
 
-def _parse_recipients(body) -> list[sendgrid_client.Recipient]:
+def parse_recipients(body) -> list[sendgrid_client.Recipient]:
     recipients_el = body.find("recipients")
     out: list[sendgrid_client.Recipient] = []
     if recipients_el is None:
@@ -69,10 +69,10 @@ def _parse_recipients(body) -> list[sendgrid_client.Recipient]:
     return out
 
 
-def _parse_attachment(body) -> sendgrid_client.Attachment | None:
+def parse_attachment(body) -> sendgrid_client.Attachment | None:
     """Extract + size-check a single optional ``<attachment>`` element.
 
-    Raises :class:`_OversizedAttachmentError` if the decoded size exceeds
+    Raises :class:`OversizedAttachmentError` if the decoded size exceeds
     :data:`MAX_ATTACHMENT_BYTES`. We use the base64 string length as an
     upper bound on the decoded size — cheaper than full decoding and good
     enough for a guard.
@@ -84,7 +84,7 @@ def _parse_attachment(body) -> sendgrid_client.Attachment | None:
     b64 = el.findtext("base64_data") or ""
     decoded_bytes_upper = (len(b64) * 3) // 4
     if decoded_bytes_upper > MAX_ATTACHMENT_BYTES:
-        raise _OversizedAttachmentError(
+        raise OversizedAttachmentError(
             f"attachment ~{decoded_bytes_upper} bytes exceeds cap of {MAX_ATTACHMENT_BYTES}"
         )
 
@@ -132,7 +132,7 @@ def _publish_final_status(channel, *, env: Envelope, **status_payload) -> None:
 
     if env.message_id:
         _PENDING_STATUSES.pop(env.message_id, None)
-        _COMPLETED_MESSAGE_IDS[env.message_id] = True
+        COMPLETED_MESSAGE_IDS[env.message_id] = True
 
 
 def _publish_pending_status(channel, env: Envelope) -> bool:
@@ -152,7 +152,7 @@ def handle(env: Envelope, channel) -> None:
     acks). SendGrid failures are converted to failed statuses and log
     messages so provider outages do not create an infinite requeue loop.
     """
-    if env.message_id in _COMPLETED_MESSAGE_IDS:
+    if env.message_id in COMPLETED_MESSAGE_IDS:
         log.info("Skipping duplicate completed send_mailing message_id=%s", env.message_id)
         return
     if _publish_pending_status(channel, env):
@@ -164,14 +164,14 @@ def handle(env: Envelope, channel) -> None:
     mail_type = body.findtext("mail_type") or ""
     template_data_str = body.findtext("template_data")
     body_html = body.findtext("body_html")
-    recipients = _parse_recipients(body)
+    recipients = parse_recipients(body)
     sent = len(recipients)
 
     # Parse attachment first so an oversized one is rejected before we
     # even resolve the template — cheap fail-fast.
     try:
-        attachment = _parse_attachment(body)
-    except _OversizedAttachmentError as exc:
+        attachment = parse_attachment(body)
+    except OversizedAttachmentError as exc:
         log.warning("send_mailing rejected: %s (campaign=%s)", exc, campaign_id)
         logs.publish_system_error(
             channel,

@@ -14,7 +14,7 @@ import envelope
 import main
 import sendgrid_client
 import sendgrid_failures
-from consumers import send_mailing, system_alert
+from consumers import monitoring_report, send_mailing, system_alert
 from publishers import logs, mailing_status
 
 
@@ -281,11 +281,180 @@ class MailingServiceUnitTests(unittest.TestCase):
             "SENDGRID_TEMPLATE_INVOICE_READY": "d-invoice",
             "SENDGRID_TEMPLATE_SESSION_UPDATE": "d-session",
             "SENDGRID_TEMPLATE_GENERAL_ANNOUNCEMENT": "d-general",
+            "SENDGRID_TEMPLATE_DAILY_REPORT": "d-daily-report",
         }
         with patch.dict(os.environ, env, clear=True):
             schemas = main.validate_startup_config()
 
-        self.assertEqual(set(schemas), {"system_alert", "send_mailing", "mailing_status", "log"})
+        self.assertEqual(
+            set(schemas),
+            {"system_alert", "send_mailing", "monitoring_report", "mailing_status", "log"},
+        )
+
+
+MONITORING_REPORT_BODY = b"""<?xml version="1.0" encoding="UTF-8"?>
+<message>
+  <header>
+    <message_id>44444444-4444-4444-8444-444444444444</message_id>
+    <timestamp>2026-05-14T06:00:00Z</timestamp>
+    <source>monitoring</source>
+    <type>send_mailing</type>
+    <version>2.0</version>
+    <correlation_id>report-2026-05-13</correlation_id>
+  </header>
+  <body>
+    <campaign_id>monitoring-daily-2026-05-13</campaign_id>
+    <subject>Daily Platform Report</subject>
+    <template_id>tmpl-monitoring-daily-report</template_id>
+    <mail_type>daily_report</mail_type>
+    <recipients>
+      <recipient>
+        <email>admin1@example.com</email>
+        <user_id>admin-001</user_id>
+        <contact>
+          <first_name>Platform</first_name>
+          <last_name>Admin</last_name>
+        </contact>
+      </recipient>
+    </recipients>
+    <template_data>{"report_date":"2026-05-13"}</template_data>
+    <attachment>
+      <filename>report.pdf</filename>
+      <content_type>application/pdf</content_type>
+      <base64_data>JVBERi0xLjQK</base64_data>
+    </attachment>
+  </body>
+</message>"""
+
+
+def _monitoring_report_env() -> envelope.Envelope:
+    return envelope.parse_and_validate(MONITORING_REPORT_BODY, _schema("monitoring_report"))
+
+
+class MonitoringReportTests(unittest.TestCase):
+    def setUp(self):
+        os.environ["SCHEMAS_DIR"] = str(SCHEMAS_DIR)
+        logs._SCHEMA = None
+        # Shared idempotency cache lives in send_mailing.
+        send_mailing.reset_idempotency_state()
+
+    def test_happy_path_sends_template_and_publishes_info_log(self):
+        env = _monitoring_report_env()
+        channel = FakeChannel()
+
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEMAS_DIR": str(SCHEMAS_DIR),
+                "FROM_EMAIL": "from@example.test",
+                "SENDGRID_TEMPLATE_DAILY_REPORT": "d-daily-report",
+            },
+            clear=True,
+        ):
+            with patch(
+                "sendgrid_client.send_template_email",
+                return_value=sendgrid_client.SendResult(accepted=["admin1@example.com"]),
+            ) as send_template:
+                monitoring_report.handle(env, channel)
+
+        # SendGrid was called with the env-resolved template (NOT the inline one).
+        kwargs = send_template.call_args.kwargs
+        self.assertEqual(kwargs["template_id"], "d-daily-report")
+        self.assertEqual(len(kwargs["recipients"]), 1)
+        self.assertEqual(kwargs["recipients"][0].email, "admin1@example.com")
+        self.assertEqual(kwargs["recipients"][0].user_id, "admin-001")
+        self.assertEqual(kwargs["template_data"], {"report_date": "2026-05-13"})
+        self.assertIsNotNone(kwargs["attachments"])
+
+        # No mailing_status publish; only an info log on the logs queue.
+        self.assertFalse(
+            any(item["routing_key"] == "crm.incoming" for item in channel.published),
+            "monitoring_report must not publish a mailing_status",
+        )
+        log_root = _body_for(channel.published, "logs")
+        self.assertEqual(log_root.findtext("body/level"), "info")
+        self.assertEqual(log_root.findtext("body/action"), "email")
+        self.assertIn("daily report", log_root.findtext("body/message"))
+
+    def test_missing_template_env_var_publishes_error_log_and_skips_send(self):
+        env = _monitoring_report_env()
+        channel = FakeChannel()
+
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEMAS_DIR": str(SCHEMAS_DIR),
+                "FROM_EMAIL": "from@example.test",
+                # SENDGRID_TEMPLATE_DAILY_REPORT intentionally unset.
+            },
+            clear=True,
+        ):
+            with patch("sendgrid_client.send_template_email") as send_template:
+                monitoring_report.handle(env, channel)
+
+        send_template.assert_not_called()
+        log_root = _body_for(channel.published, "logs")
+        self.assertEqual(log_root.findtext("body/level"), "error")
+        self.assertIn("unknown_message_type", log_root.findtext("body/message"))
+
+    def test_oversized_attachment_publishes_error_log_and_skips_send(self):
+        # Build an envelope with a >25 MB base64 attachment.
+        big_b64 = "A" * (34 * 1024 * 1024)
+        raw = MONITORING_REPORT_BODY.replace(b"JVBERi0xLjQK", big_b64.encode("ascii"))
+        env = envelope.parse_and_validate(raw, _schema("monitoring_report"))
+        channel = FakeChannel()
+
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEMAS_DIR": str(SCHEMAS_DIR),
+                "FROM_EMAIL": "from@example.test",
+                "SENDGRID_TEMPLATE_DAILY_REPORT": "d-daily-report",
+            },
+            clear=True,
+        ):
+            with patch("sendgrid_client.send_template_email") as send_template:
+                monitoring_report.handle(env, channel)
+
+        send_template.assert_not_called()
+        log_root = _body_for(channel.published, "logs")
+        self.assertEqual(log_root.findtext("body/action"), "xml_validation")
+        self.assertIn("invalid_xml_format", log_root.findtext("body/message"))
+
+    def test_duplicate_message_id_does_not_resend(self):
+        env = _monitoring_report_env()
+        channel = FakeChannel()
+
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEMAS_DIR": str(SCHEMAS_DIR),
+                "FROM_EMAIL": "from@example.test",
+                "SENDGRID_TEMPLATE_DAILY_REPORT": "d-daily-report",
+            },
+            clear=True,
+        ):
+            with patch(
+                "sendgrid_client.send_template_email",
+                return_value=sendgrid_client.SendResult(accepted=["admin1@example.com"]),
+            ) as send_template:
+                monitoring_report.handle(env, channel)
+                monitoring_report.handle(env, channel)
+
+        self.assertEqual(send_template.call_count, 1)
+
+    def test_xsd_rejects_unknown_mail_type(self):
+        raw = MONITORING_REPORT_BODY.replace(
+            b"<mail_type>daily_report</mail_type>",
+            b"<mail_type>daily_summary</mail_type>",
+        )
+        with self.assertRaises(envelope.SchemaValidationError):
+            envelope.parse_and_validate(raw, _schema("monitoring_report"))
+
+    def test_xsd_rejects_non_monitoring_source(self):
+        raw = MONITORING_REPORT_BODY.replace(b"<source>monitoring</source>", b"<source>crm</source>")
+        with self.assertRaises(envelope.SchemaValidationError):
+            envelope.parse_and_validate(raw, _schema("monitoring_report"))
 
 
 if __name__ == "__main__":

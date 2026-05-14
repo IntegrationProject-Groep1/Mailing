@@ -10,6 +10,7 @@ from lxml import etree
 import envelope
 import sendgrid_failures
 import templates
+from consumers import monitoring_report as monitoring_report_consumer
 from consumers import send_mailing as send_mailing_consumer
 from consumers import system_alert as system_alert_consumer
 from publishers import logs
@@ -18,6 +19,7 @@ from sendgrid_client import SendGridError
 ALERT_QUEUE = "monitoring.alerts"
 CRM_SEND_MAILING_QUEUE = "crm.to.mailing"
 FACTURATIE_SEND_MAILING_QUEUE = "facturatie.to.mailing"
+MONITORING_REPORT_QUEUE = "monitoring.reports"
 LOG_QUEUE = logs.LOG_QUEUE
 
 CONNECT_RETRIES = 10
@@ -100,7 +102,7 @@ def validate_startup_config() -> dict[str, etree.XMLSchema]:
 
     return {
         name: _load_schema(name)
-        for name in ("system_alert", "send_mailing", "mailing_status", "log")
+        for name in ("system_alert", "send_mailing", "monitoring_report", "mailing_status", "log")
     }
 
 
@@ -223,6 +225,7 @@ def run() -> None:
     schemas = validate_startup_config()
     system_alert_schema = schemas["system_alert"]
     send_mailing_schema = schemas["send_mailing"]
+    monitoring_report_schema = schemas["monitoring_report"]
 
     # Tracks whether we just recovered from an unplanned disconnect.
     # First pass through the loop is a clean startup (False). Set True
@@ -243,6 +246,7 @@ def run() -> None:
             channel.queue_declare(queue=ALERT_QUEUE, durable=True)
             channel.queue_declare(queue=CRM_SEND_MAILING_QUEUE, durable=True)
             channel.queue_declare(queue=FACTURATIE_SEND_MAILING_QUEUE, durable=True)
+            channel.queue_declare(queue=MONITORING_REPORT_QUEUE, durable=True)
             # Queues we publish to. crm.incoming is owned by CRM but we declare
             # it here to ensure it exists before the first publish.
             channel.queue_declare(queue=LOG_QUEUE, durable=True)
@@ -295,11 +299,21 @@ def run() -> None:
                 ),
                 auto_ack=False,
             )
+            channel.basic_consume(
+                queue=MONITORING_REPORT_QUEUE,
+                on_message_callback=_build_callback(
+                    monitoring_report_schema, monitoring_report_consumer.handle, pass_channel=True,
+                ),
+                auto_ack=False,
+            )
 
             _install_signal_handlers(connection, channel)
             log.info(
-                "Consuming queues: %s, %s, %s",
-                ALERT_QUEUE, CRM_SEND_MAILING_QUEUE, FACTURATIE_SEND_MAILING_QUEUE,
+                "Consuming queues: %s, %s, %s, %s",
+                ALERT_QUEUE,
+                CRM_SEND_MAILING_QUEUE,
+                FACTURATIE_SEND_MAILING_QUEUE,
+                MONITORING_REPORT_QUEUE,
             )
             channel.start_consuming()
             log.info("Consumer stopped cleanly, exiting")

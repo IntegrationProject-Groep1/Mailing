@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<message>
+  <header>
+    <message_id>{{MESSAGE_ID}}</message_id>
+    <timestamp>{{TIMESTAMP}}</timestamp>
+    <source>monitoring</source>
+    <type>send_mailing</type>
+    <version>2.0</version>
+    <correlation_id>report-2026-05-13</correlation_id>
+  </header>
+  <body>
+    <campaign_id>monitoring-daily-2026-05-13</campaign_id>
+    <subject>Daily Platform Report — 2026-05-13</subject>
+    <template_id>tmpl-monitoring-daily-report</template_id>
+    <mail_type>daily_report</mail_type>
+    <recipients>
+      <recipient>
+        <email>admin1@example.com</email>
+        <user_id>admin-001</user_id>
+        <contact>
+          <first_name>Platform</first_name>
+          <last_name>Admin</last_name>
+        </contact>
+      </recipient>
+      <recipient>
+        <email>client@example.com</email>
+        <user_id>client-001</user_id>
+        <contact>
+          <first_name>Event</first_name>
+          <last_name>Client</last_name>
+        </contact>
+      </recipient>
+    </recipients>
+    <template_data>{"report_date":"2026-05-13","overall_health":8.4,"systems_down":1,"top_alert":"DB timeout (12)"}</template_data>
+    <attachment>
+      <filename>platform-report-2026-05-13.pdf</filename>
+      <content_type>application/pdf</content_type>
+      <!-- Tiny base64-encoded PDF stand-in (not a real PDF; SendGrid sandbox accepts any bytes). -->
+      <base64_data>JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4KJSVFT0YK</base64_data>
+    </attachment>
+  </body>
+</message>
