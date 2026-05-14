@@ -1,3 +1,5 @@
+
+
 <?xml version="1.0" encoding="UTF-8"?>
 <message>
   <header>
@@ -9,19 +11,25 @@
     <correlation_id>{{CORRELATION_ID}}</correlation_id>
   </header>
   <body>
-    <campaign_id>sg-invoice-00142</campaign_id>
-    <subject>Uw factuur is beschikbaar</subject>
+    <campaign_id>foss-invoice-228</campaign_id>
+    <subject>Uw factuur staat klaar</subject>
     <mail_type>invoice_ready</mail_type>
     <recipients>
       <recipient>
-        <email>jan.peeters@example.test</email>
-        <identity_uuid>e8b27c1d-4f2a-4b3e-9c5f-123456789abc</identity_uuid>
+        <email>jan.peeters@bedrijf.be</email>
+        <identity_uuid>a1b2c3d4-e5f6-7890-abcd-ef1234567890</identity_uuid>
         <contact>
           <first_name>Jan</first_name>
           <last_name>Peeters</last_name>
         </contact>
       </recipient>
     </recipients>
-    <template_data>{"invoice_id":"foss-inv-00142","amount":"31.50","currency":"eur","due_date":"2026-06-15"}</template_data>
+    <template_data>{"invoice_number":"FOSS00228","invoice_date":"2026-05-14","due_date":"2026-05-19","seller":{"company":"Desiderius","address":"Nijverheidskaai 170, 1070 Anderlecht","email":"desiderius@email.com","vat_number":"","iban":"","bic":""},"buyer":{"first_name":"Jan","last_name":"Peeters","email":"jan.peeters@bedrijf.be","address":"...","vat_number":""},"items":[{"description":"Inschrijvingskosten","quantity":1,"unit_price":"250.00","vat_rate":21.0,"vat_amount":"52.50","total":"302.50","currency":"eur"}],"summary":{"subtotal":"250.00","vat_total":"52.50","total":"302.50","currency":"eur"},"payment":{"reference":"+++228/2026/00001+++","method":"on_site"}}</template_data>
+    <attachment>
+      <filename>factuur-FOSS00228.pdf</filename>
+      <content_type>application/pdf</content_type>
+      <!-- Tiny base64-encoded PDF stand-in (not a real PDF; SendGrid sandbox accepts any bytes). -->
+      <base64_data>JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4KJSVFT0YK</base64_data>
+    </attachment>
   </body>
 </message>
