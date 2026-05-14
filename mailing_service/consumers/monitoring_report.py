@@ -140,14 +140,15 @@ def handle(env: Envelope, channel) -> None:
             "SendGrid rejected monitoring_report batch campaign=%s rejected=%s",
             campaign_id, result.rejected,
         )
-        logs.publish_system_error(
+        COMPLETED_MESSAGE_IDS[env.message_id] = True
+        logs.publish(
             channel,
-            error_code=logs.UNKNOWN_MESSAGE_TYPE,
-            error_description=(
-                f"SendGrid rejected recipients for campaign={campaign_id}: "
-                f"{', '.join(result.rejected)}"
+            level="warning",
+            action="email",
+            message=(
+                f"SendGrid rejected all recipients for campaign={campaign_id} "
+                f"(permanent delivery failure): {', '.join(result.rejected)}"
             ),
-            related_message_id=env.message_id,
         )
         return
 

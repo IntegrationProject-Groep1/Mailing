@@ -421,6 +421,35 @@ class MonitoringReportTests(unittest.TestCase):
         self.assertEqual(log_root.findtext("body/action"), "xml_validation")
         self.assertIn("invalid_xml_format", log_root.findtext("body/message"))
 
+    def test_sendgrid_batch_rejection_logs_warning_and_marks_complete(self):
+        env = _monitoring_report_env()
+        channel = FakeChannel()
+
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEMAS_DIR": str(SCHEMAS_DIR),
+                "FROM_EMAIL": "from@example.test",
+                "SENDGRID_TEMPLATE_DAILY_REPORT": "d-daily-report",
+            },
+            clear=True,
+        ):
+            with patch(
+                "sendgrid_client.send_template_email",
+                return_value=sendgrid_client.SendResult(rejected=["admin1@example.com"]),
+            ):
+                monitoring_report.handle(env, channel)
+
+        # Log must be warning-level email action, not a system_error.
+        log_root = _body_for(channel.published, "logs")
+        self.assertEqual(log_root.findtext("body/level"), "warning")
+        self.assertEqual(log_root.findtext("body/action"), "email")
+        self.assertNotIn("unknown_message_type", log_root.findtext("body/message"))
+
+        # Message must be marked complete so redelivery is skipped.
+        from consumers.send_mailing import COMPLETED_MESSAGE_IDS
+        self.assertIn(env.message_id, COMPLETED_MESSAGE_IDS)
+
     def test_duplicate_message_id_does_not_resend(self):
         env = _monitoring_report_env()
         channel = FakeChannel()
