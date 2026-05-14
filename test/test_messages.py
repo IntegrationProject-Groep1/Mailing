@@ -23,6 +23,7 @@ from pathlib import Path
 import pika
 
 QUEUE_MONITORING_ALERTS = "monitoring.alerts"
+QUEUE_MONITORING_REPORTS = "monitoring.reports"
 QUEUE_CRM_SEND_MAILING = "crm.to.mailing"
 QUEUE_FACTURATIE_SEND_MAILING = "facturatie.to.mailing"
 QUEUE_CRM_INCOMING = "crm.incoming"
@@ -93,6 +94,21 @@ def _build_oversized_send_mailing() -> bytes:
 </message>""")
 
 
+def _build_monitoring_report_unknown_mail_type() -> bytes:
+    """A monitoring_report with mail_type not in our enum.
+
+    The XSD locks mail_type to ``daily_report``; anything else is
+    rejected at validation time and surfaces as an INVALID_XML_FORMAT
+    log on the logs queue. No email is sent.
+    """
+    raw = (FIXTURES_DIR / "monitoring_daily_report.xml").read_text()
+    raw = raw.replace(
+        "<mail_type>daily_report</mail_type>",
+        "<mail_type>daily_summary</mail_type>",
+    )
+    return _substitute(raw)
+
+
 def _build_unknown_mail_type() -> bytes:
     """A send_mailing with mail_type not in our enum.
 
@@ -119,6 +135,8 @@ SCENARIOS = {
     "crm_send_mailing_oversized_attachment": (QUEUE_CRM_SEND_MAILING,      _build_oversized_send_mailing),
     "crm_send_mailing_unknown_type":      (QUEUE_CRM_SEND_MAILING,         _build_unknown_mail_type),
     "facturatie_send_mailing":            (QUEUE_FACTURATIE_SEND_MAILING,  lambda: _load_fixture("facturatie_send_mailing")),
+    "monitoring_daily_report":            (QUEUE_MONITORING_REPORTS,       lambda: _load_fixture("monitoring_daily_report")),
+    "monitoring_daily_report_unknown_mail_type": (QUEUE_MONITORING_REPORTS, _build_monitoring_report_unknown_mail_type),
 }
 
 
@@ -153,6 +171,7 @@ def _declare_queues(channel) -> None:
     """
     for q in (
         QUEUE_MONITORING_ALERTS,
+        QUEUE_MONITORING_REPORTS,
         QUEUE_CRM_SEND_MAILING,
         QUEUE_FACTURATIE_SEND_MAILING,
         QUEUE_CRM_INCOMING,

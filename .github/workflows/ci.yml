@@ -46,7 +46,7 @@ jobs:
           import sys
           sys.path.insert(0, "mailing_service")
           import main, envelope, templates, sendgrid_client, failure_tracker, sendgrid_failures
-          from consumers import system_alert, send_mailing
+          from consumers import system_alert, send_mailing, monitoring_report
           from publishers import logs, mailing_status
           print("All modules import cleanly.")
           PY
@@ -74,9 +74,15 @@ jobs:
               "monitoring.alerts":        etree.XMLSchema(etree.parse("mailing_service/schemas/system_alert.xsd")),
               "crm.to.mailing":           etree.XMLSchema(etree.parse("mailing_service/schemas/send_mailing.xsd")),
               "facturatie.to.mailing":    etree.XMLSchema(etree.parse("mailing_service/schemas/send_mailing.xsd")),
+              "monitoring.reports":       etree.XMLSchema(etree.parse("mailing_service/schemas/monitoring_report.xsd")),
           }
           # Negative fixtures: known-bad payloads our consumer must reject.
-          NEGATIVES = {"legacy_alert", "malformed_envelope_missing_header", "crm_send_mailing_unknown_type"}
+          NEGATIVES = {
+              "legacy_alert",
+              "malformed_envelope_missing_header",
+              "crm_send_mailing_unknown_type",
+              "monitoring_daily_report_unknown_mail_type",
+          }
 
           ok = True
           for name, (queue, build) in tm.SCENARIOS.items():

@@ -4,3 +4,4 @@ rabbitmq-data/
 __pycache__/
 *.pyc
 .mypy_cache/
+.claude/

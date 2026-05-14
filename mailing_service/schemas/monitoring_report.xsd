@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Monitoring → Mailing send_mailing (daily platform report).
+  Queue: monitoring.reports. Shape parallels send_mailing.xsd but the enums
+  are locked to monitoring's payload and `user_id` is a free-form string
+  (monitoring uses values like "admin-001", not UUIDs). `template_id` is
+  accepted on the wire so monitoring's payload validates, but the runtime
+  resolves the SendGrid template via SENDGRID_TEMPLATE_DAILY_REPORT instead.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <xs:simpleType name="UUIDType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="ContactType">
+    <xs:sequence>
+      <xs:element name="first_name" type="xs:string"/>
+      <xs:element name="last_name"  type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="RecipientType">
+    <xs:sequence>
+      <xs:element name="email"   type="xs:string"/>
+      <xs:element name="user_id" type="xs:string"/>
+      <xs:element name="contact" type="ContactType"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AttachmentType">
+    <xs:sequence>
+      <xs:element name="filename"     type="xs:string"/>
+      <xs:element name="content_type" type="xs:string"/>
+      <xs:element name="base64_data"  type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="message">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="header">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="message_id" type="UUIDType"/>
+              <xs:element name="timestamp"  type="xs:dateTime"/>
+              <xs:element name="source">
+                <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="monitoring"/>
+                </xs:restriction></xs:simpleType>
+              </xs:element>
+              <xs:element name="type">
+                <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="send_mailing"/>
+                </xs:restriction></xs:simpleType>
+              </xs:element>
+              <xs:element name="version">
+                <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="2.0"/>
+                </xs:restriction></xs:simpleType>
+              </xs:element>
+              <xs:element name="correlation_id" type="xs:string"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <xs:element name="body">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="campaign_id" type="xs:string"/>
+              <xs:element name="subject"     type="xs:string"/>
+              <!-- Accepted on the wire but ignored at runtime; the real
+                   SendGrid template id is resolved from
+                   SENDGRID_TEMPLATE_DAILY_REPORT so the account-specific
+                   id stays out of cross-team payloads. -->
+              <xs:element name="template_id" type="xs:string" minOccurs="0"/>
+              <xs:element name="mail_type">
+                <xs:simpleType><xs:restriction base="xs:string">
+                  <xs:enumeration value="daily_report"/>
+                </xs:restriction></xs:simpleType>
+              </xs:element>
+              <xs:element name="recipients">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="recipient" type="RecipientType" maxOccurs="unbounded"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+              <xs:element name="template_data" type="xs:string"      minOccurs="0"/>
+              <xs:element name="attachment"    type="AttachmentType" minOccurs="0"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
