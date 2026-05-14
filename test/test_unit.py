@@ -164,7 +164,7 @@ class MailingServiceUnitTests(unittest.TestCase):
 </alert>"""
 
         with patch("sendgrid_client.send_email") as send_email:
-            system_alert.handle(raw, _schema("system_alert"))
+            system_alert.handle(raw, _schema("system_alert"), channel=None)
 
         html_body = send_email.call_args.args[1]
         self.assertIn("&lt;b&gt;facturatie&lt;/b&gt;", html_body)
