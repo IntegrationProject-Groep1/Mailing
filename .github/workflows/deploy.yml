@@ -2,20 +2,23 @@ name: Deploy Pipeline
 
 on:
   workflow_run:
-    workflows: ["CI Pipeline"] # Must match the 'name' of your CI workflow exactly
+    workflows: ["CI Pipeline"]
     types:
       - completed
+    branches:
+      - main
+      - dev
   workflow_dispatch:
 
 jobs:
   build-and-push:
     name: Build and Push Docker Image
-    # Only deploy if the CI Pipeline was successful AND the trigger was a version tag (starts with 'v')
-    # This prevents development branches from being pushed to the production registry.
     if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      (github.event.workflow_run.head_branch == null ||
-       startsWith(github.event.workflow_run.head_branch, 'v'))
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.head_branch == 'main' ||
+        github.event.workflow_run.head_branch == 'dev'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,12 +28,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # Check out the specific commit SHA that passed the CI tests
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+
+      - name: Set image tag
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            BRANCH="${{ github.ref_name }}"
+          else
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+          fi
+
+          if [[ "$BRANCH" == "main" ]]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest-dev" >> $GITHUB_OUTPUT
+          fi
 
       - name: Lowercase repo name
         id: repo_name
-        # Docker image names must be lowercase. This step converts 'User/Repo' to 'user/repo'.
         run: echo "value=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
 
       - name: Log in to GitHub Container Registry (GHCR)
@@ -45,11 +61,6 @@ jobs:
         with:
           context: .
           push: true
-          # Three tags for the image:
-          # 1. ':latest' - For Watchtower to automatically pull the newest version.
-          # 2. ':vX.X.X' - Using the branch/tag name (e.g., v1.2.1) for easy rollbacks and identification.
-          # 3. ':SHA'    - Using the unique commit hash as a fallback for absolute version tracking.
           tags: |
-            ghcr.io/${{ steps.repo_name.outputs.value }}:latest
-            ghcr.io/${{ steps.repo_name.outputs.value }}:${{ github.event.workflow_run.head_branch }}
-            ghcr.io/${{ steps.repo_name.outputs.value }}:${{ github.event.workflow_run.head_sha }}
+            ghcr.io/${{ steps.repo_name.outputs.value }}:${{ steps.vars.outputs.tag }}
+            ghcr.io/${{ steps.repo_name.outputs.value }}:${{ github.event.workflow_run.head_sha || github.sha }}
